@@ -25712,3 +25712,270 @@ const ArabicProofreaderV18 = Object.freeze({
   }
 })(typeof globalThis !== "undefined" ? globalThis : this);
 /* END V25.7.0 */
+
+/* ============================================================
+ * V25.8.0 — Contextual Grammar + Morphology + Confidence + FP Guard + Dedup
+ * Additive-only layer built on V25.7.0.
+ * ============================================================ */
+(function installV258(baseRoot) {
+  "use strict";
+  const g = baseRoot || (typeof globalThis !== 'undefined' ? globalThis : this);
+  const base = (typeof module === 'object' && module && module.exports ? module.exports : null) || g.ArabicProofreaderV18 || g.V18 || g.ArabicProofreaderV19 || null;
+  if (!base || base.__V258_INSTALLED__) return;
+
+  const CATEGORY = Object.freeze({
+    SPELL: 'الأخطاء الإملائية', GRAM: 'الأخطاء النحوية', COMMON: 'الأخطاء الشائعة',
+    PUNCT: 'أخطاء علامات الترقيم', STYLE: 'تحسين الصياغة'
+  });
+  const TYPE_RANK = Object.freeze({
+    [CATEGORY.SPELL]: 1, [CATEGORY.GRAM]: 2, [CATEGORY.COMMON]: 3,
+    [CATEGORY.PUNCT]: 4, [CATEGORY.STYLE]: 5
+  });
+  const GRAM_RULE = /CASE|AGREEMENT|GOVERN|ROLE|SVO|SUBJECT|OBJECT|HAL|PREDICATE|ADJECTIVE|RELATIVE|BADAL|IDAFA|NAAT|NOUN|VERB|JUSSIVE|MOOD|NUMBER|DUAL|PLURAL/i;
+  const ORTH_RULE = /SPELL|ORTH|HAMZA|TAA|ALEF|ALIF|PUNCT|TANWIN|WAWR|WAW/i;
+
+  function norm(s){ return String(s ?? '').replace(/\s+/gu,' ').trim(); }
+  function tokenAt(tokens, index){
+    if(!Array.isArray(tokens)) return null;
+    for(const t of tokens){
+      const st = Number(t.index ?? -1), en = st + String(t.surface ?? t.clean ?? '').length;
+      if(index >= st && index < en) return t;
+    }
+    return null;
+  }
+  function clauseFor(clauses, tokenIndex){
+    return (clauses||[]).find(c => Number(c.start) <= tokenIndex && tokenIndex < Number(c.end)) || null;
+  }
+  function roleFor(roles, tokenIndex){ return Array.isArray(roles) ? roles[tokenIndex] || null : null; }
+  function hasSameClauseRelation(parsed, tokenIndex){
+    const rels = [parsed?.subjectRelations, parsed?.objectRelations, parsed?.argumentFrames].filter(Boolean);
+    const hit = [];
+    for(const group of rels){
+      for(const r of group || []){
+        if(!r) continue;
+        const vals = [r.subjectIndex,r.objectIndex,r.verbIndex,r.headIndex,r.dependentIndex,r.targetIndex].filter(Number.isInteger);
+        if(vals.includes(tokenIndex)) hit.push(r);
+      }
+    }
+    return hit.length ? hit : null;
+  }
+  function protectedAt(spans, idx, len){
+    return (spans||[]).some(s => {
+      const a=Number(s.start??s.index??-1), b=Number(s.end??(a+Number(s.length||0)));
+      return a>=0 && idx < b && idx+len > a;
+    });
+  }
+  function morphologyEvidence(api, original){
+    try{
+      const m = api.inspectWord(original) || {};
+      const cands = Array.isArray(m.candidates) ? m.candidates : [];
+      const top = Number(m.confidence ?? m.posConfidence ?? (cands[0]?.confidence) ?? 0);
+      return {
+        confidence: Math.max(0, Math.min(1, top || 0)),
+        pos: m.resolvedPos || m.pos || cands[0]?.pos || null,
+        lemma: m.lemma || cands[0]?.lemma || null,
+        ambiguous: Boolean(m.posAmbiguous) || cands.length > 1,
+        candidates: cands.length
+      };
+    }catch(_){ return {confidence:0.35,pos:null,lemma:null,ambiguous:true,candidates:0}; }
+  }
+  function categoryOf(f){
+    return f.categoryLabel || f.category || (String(f.classification||'').includes('style') ? CATEGORY.STYLE : '');
+  }
+  function contextScore(f, parsed){
+    const idx = Number(f.index ?? -1), len = Number(f.length ?? String(f.original||'').length);
+    const tok = tokenAt(parsed.tokens, idx);
+    const tokenIndex = tok ? Number(tok.index) : -1;
+    const role = tokenIndex >= 0 ? roleFor(parsed.roles, tokenIndex) : null;
+    const clause = tokenIndex >= 0 ? clauseFor(parsed.clauses, tokenIndex) : null;
+    const rel = tokenIndex >= 0 ? hasSameClauseRelation(parsed, tokenIndex) : null;
+    const morph = morphologyEvidence(base, String(f.original||tok?.surface||''));
+    let syntactic = role?.confidence ? Number(role.confidence) : 0.35;
+    let local = clause ? 0.75 : 0.25;
+    if(rel) local += 0.15;
+    if(f.evidence && Array.isArray(f.evidence)) local += Math.min(0.1, f.evidence.length * 0.01);
+    const lexicalValid = morph.confidence >= 0.94;
+    const explicitOrth = categoryOf(f) === CATEGORY.SPELL || Boolean(f.evidence && (f.evidence.explicitOrthography || f.evidence.strongOrthography || f.metadata?.rootCause));
+    const grammar = categoryOf(f) === CATEGORY.GRAM || (categoryOf(f) !== CATEGORY.SPELL && GRAM_RULE.test(String(f.ruleId||'')));
+    const orth = categoryOf(f) === CATEGORY.SPELL || ORTH_RULE.test(String(f.ruleId||''));
+    let conflict = 0;
+    if(morph.ambiguous) conflict += 0.12;
+    if(role && Array.isArray(role.conflicts) && role.conflicts.length) conflict += 0.1;
+    if(f.requiresReview || f.manualOnly) conflict += 0.05;
+    if(f.contextValidation?.valid === false) conflict += 0.2;
+    if(protectedAt(parsed.protectedSpans, idx, len)) conflict += 0.9;
+
+    let score = 0.35*morph.confidence + 0.25*syntactic + 0.25*local + 0.15*(explicitOrth?1:lexicalValid?0.8:0.45) - conflict;
+    if(orth && explicitOrth) score += 0.12;
+    if(grammar && !rel && !role) score -= 0.12;
+    score = Math.max(0, Math.min(1, score));
+    return {score,morph,syntactic,local,conflict,tokenIndex,clause,role,relation:rel,lexicalValid,explicitOrth,grammar,orth};
+  }
+
+  function enrich(f, ev){
+    f.v258 = {
+      version:'25.8.0', confidence:ev.score, morphology:ev.morph.confidence,
+      pos:ev.morph.pos, syntactic:ev.syntactic, localContext:ev.local,
+      conflict:ev.conflict, ambiguous:ev.morph.ambiguous,
+      clauseId:ev.clause?.id || null, role:ev.role?.role || null,
+      relationEvidence:Boolean(ev.relation), lexicalValid:ev.lexicalValid,
+      protected:Boolean(ev.conflict >= 0.9), decision:'KEEP'
+    };
+    f.confidence = Math.max(0, Math.min(1, Math.max(Number(f.confidence||0), ev.score)));
+    f.evidence = Array.isArray(f.evidence) ? [...f.evidence] : (f.evidence ? [f.evidence] : []);
+    f.evidence.push('V258-context', `morph:${ev.morph.confidence.toFixed(3)}`, `syntactic:${ev.syntactic.toFixed(3)}`, `local:${ev.local.toFixed(3)}`);
+    return f;
+  }
+
+  function decide(findings, parsed){
+    const visible=[], suppressed=[];
+    const grouped = new Map();
+    for(const original of findings || []){
+      const f = {...original};
+      const ev = contextScore(f, parsed);
+      enrich(f, ev);
+      const cat = categoryOf(f);
+      const rank = TYPE_RANK[cat] || 9;
+      const protectedItem = ev.conflict >= 0.85;
+      const weakGrammar = ev.grammar && !ev.orth && ev.score < 0.77 && !ev.explicitOrth;
+      const ambiguousGrammar = ev.grammar && ev.morph.ambiguous && ev.score < 0.88;
+
+      if(protectedItem){ f.v258.decision='ABSTAIN'; f.autoCorrectable=false; f.safeCandidate=false; f.requiresReview=true; f.manualOnly=true; suppressed.push({finding:f,reason:'V258-protected-span'}); continue; }
+      if(weakGrammar || ambiguousGrammar){
+        f.v258.decision='ABSTAIN'; f.autoCorrectable=false; f.safeCandidate=false; f.requiresReview=true; f.manualOnly=true;
+        f.status='ABSTAIN'; f.severity='ABSTAIN'; f.recommendedAction='review';
+        // Keep the diagnostic finding visible; ABSTAIN means no automatic correction, not data loss.
+      }
+
+      if(cat===CATEGORY.GRAM){
+        const auto = ev.score >= 0.985 && !ev.morph.ambiguous && ev.conflict < 0.08 && (ev.relation || ev.role || f.safeCandidate===true);
+        f.autoCorrectable = Boolean(f.autoCorrectable && auto);
+        if(f.autoCorrectable) { f.v258.decision='AUTO'; f.recommendedAction='auto-correct'; }
+        else { if(f.v258.decision!=='ABSTAIN') f.v258.decision='REVIEW'; f.requiresReview=true; f.manualOnly=true; }
+      } else if(cat===CATEGORY.SPELL){
+        const auto = ev.score >= 0.985 && (ev.explicitOrth || ev.lexicalValid) && ev.conflict < 0.12;
+        if(f.autoCorrectable) f.autoCorrectable=Boolean(auto);
+        if(auto && f.safeCandidate!==false && !f.requiresReview) f.v258.decision='AUTO'; else if(f.v258.decision!=='ABSTAIN') f.v258.decision='REVIEW';
+      }
+      const spanKey = `${Number(f.index??-1)}:${Number(f.length??String(f.original||'').length)}`;
+      const arr = grouped.get(spanKey) || []; arr.push({f,rank,score:ev.score}); grouped.set(spanKey,arr);
+    }
+
+    // Deduplicate same-span candidates. Never let a lower-priority/similar candidate coexist silently.
+    for(const arr of grouped.values()){
+      arr.sort((a,b)=> (a.rank-b.rank) || (b.score-a.score));
+      const top=arr[0];
+      if(arr.length===1){ visible.push(top.f); continue; }
+      const competing = arr.filter(x => norm(x.f.replacement) !== norm(top.f.replacement));
+      if(competing.length){
+        const gap = top.score - competing[0].score;
+        if(gap < 0.08){
+          top.f.autoCorrectable=false; top.f.safeCandidate=false; top.f.requiresReview=true; top.f.manualOnly=true;
+          top.f.v258.decision='ABSTAIN'; top.f.v258.competingCandidates=arr.map(x=>x.f.replacement).filter(Boolean);
+        }
+        visible.push(top.f);
+        for(const x of arr.slice(1)) suppressed.push({finding:x.f,reason:'V258-dedup-competition'});
+      } else {
+        visible.push(top.f);
+        for(const x of arr.slice(1)) suppressed.push({finding:x.f,reason:'V258-duplicate-same-replacement'});
+      }
+    }
+    return {visible,suppressed};
+  }
+
+  function applyCorrections(original, findings){
+    const usable = (findings||[]).filter(f => f && f.replacement != null && f.autoCorrectable && f.v258?.decision !== 'ABSTAIN');
+    if(!usable.length) return String(original ?? '');
+    const ordered = [...usable].sort((a,b)=>Number(b.index)-Number(a.index));
+    let out=String(original ?? '');
+    for(const f of ordered){
+      const i=Number(f.index), len=Number(f.length||0);
+      if(i<0 || i>out.length) continue;
+      out = out.slice(0,i) + String(f.replacement) + out.slice(i+len);
+    }
+    return out;
+  }
+
+  function createApi(baseApi){
+    const api = Object.assign({}, baseApi);
+    const rawAnalyze = baseApi.analyze.bind(baseApi);
+    const rawCorrect = typeof baseApi.correct === 'function' ? baseApi.correct.bind(baseApi) : null;
+    const rawSuggest = typeof baseApi.suggest === 'function' ? baseApi.suggest.bind(baseApi) : null;
+
+    api.__V258_INSTALLED__ = true;
+    api.V258_LAYER_VERSION='1.0';
+    api.analyze = function(input, options={}){
+      const baseResult = rawAnalyze(input, options);
+      let parsed;
+      try { parsed = typeof baseApi.parse==='function' ? baseApi.parse(input, options) : {tokens:[],clauses:[],roles:[],subjectRelations:[],objectRelations:[],argumentFrames:[],protectedSpans:[]}; }
+      catch(_){ parsed={tokens:[],clauses:[],roles:[],subjectRelations:[],objectRelations:[],argumentFrames:[],protectedSpans:[]}; }
+      const decided = decide(baseResult.findings || [], parsed);
+      const corrected = applyCorrections(baseResult.original ?? input, decided.visible);
+      const result = Object.assign({}, baseResult, {
+        corrected,
+        findings: decided.visible,
+        errors: decided.visible,
+        suggestions: decided.visible.filter(x=>!x.autoCorrectable),
+        autoCorrectable: decided.visible.filter(x=>x.autoCorrectable),
+        manualReview: decided.visible.filter(x=>!x.autoCorrectable),
+        stats: Object.assign({}, baseResult.stats||{}, {v258Visible:decided.visible.length,v258Suppressed:decided.suppressed.length}),
+        v258: {
+          version:'25.8.0',
+          suppressed: decided.suppressed.length,
+          deduplicated: Math.max(0,(baseResult.findings||[]).length - decided.visible.length),
+          findings: decided.visible.map(f=>({ruleId:f.ruleId,index:f.index,original:f.original,replacement:f.replacement,confidence:f.v258?.confidence,decision:f.v258?.decision}))
+        }
+      });
+      result.guard = Object.assign({}, result.guard||{}, {v258Suppressed:decided.suppressed.map(x=>({ruleId:x.finding.ruleId,reason:x.reason,original:x.finding.original,replacement:x.finding.replacement}))});
+      return result;
+    };
+    api.correct = function(input, options={}){ return api.analyze(input, options).corrected; };
+    api.suggest = function(input, options={}){ return api.analyze(input, options).suggestions; };
+
+    api.runV258Regression = function(){
+      const gold = [
+        ['ان الطالب مجتهد.','إن'], ['لم اكتبها.','أكتبها'],
+        ['رأيت الكتاب مفيدٌ.','مفيدًا'], ['الطالبات المجتهدات حضر.','حضرن']
+      ];
+      const controls = [
+        'هذا الرجل أخوه كريم.','هذا الرجل الكريم حضر.','الكتب الجديدة وصلت أمس.',
+        'من يجتهد ينجح.','إن الطالب مجتهد.','كان الطالب مجتهدًا.',
+        'مررت بمحمدٍ وعليٍ.','رأيت رجلًا كريمًا.','قيمة احترام الآخرين.'
+      ];
+      const errors=gold.map(([t,e])=>{const r=api.analyze(t,{safeMode:true}); return {text:t,expected:e,hit:String(r.corrected).includes(e)||r.findings.some(f=>String(f.replacement||'').includes(e))};});
+      const clean=controls.map(t=>{const r=api.analyze(t,{safeMode:true}); return {text:t,changed:r.corrected!==t,findings:r.findings.length};});
+      return {version:'25.8.0',gold:errors,controls:clean,caught:errors.filter(x=>x.hit).length,totalGold:errors.length,falsePositives:clean.filter(x=>x.changed).length,totalControls:clean.length,recall:errors.filter(x=>x.hit).length/errors.length, fpr:clean.filter(x=>x.changed).length/clean.length, valid:errors.every(x=>x.hit)&&clean.every(x=>!x.changed)};
+    };
+
+    api.runV258Benchmark = function(benchmark=baseApi.ARABIC_PRO_BENCHMARK_V253, options={}){
+      if(!benchmark) return {version:'25.8.0',available:false};
+      const normEq=s=>norm(s);
+      let caught=0, fp=0, wrong=0;
+      for(const t of benchmark.errors||[]){ const r=api.analyze(t.text,options); const reps=(r.findings||[]).map(f=>f.replacement).filter(Boolean); const hit=(t.replacements||[]).some(e=>reps.some(g=>normEq(g)===normEq(e)||normEq(g).includes(normEq(e))||normEq(e).includes(normEq(g)))); if(hit)caught++; else wrong++; }
+      for(const t of benchmark.controls||[]){ const r=api.analyze(t.text,options); if((r.findings||[]).some(f=>!['style','SUGGESTION','STYLE'].includes(f.classification)&&f.suggestionGroup!=='تحسين التنسيق والأسلوب')) fp++; }
+      const total=(benchmark.errors||[]).length, controls=(benchmark.controls||[]).length;
+      const recall=total?caught/total:1, precision=(caught+fp)?caught/(caught+fp):1, fpr=controls?fp/controls:0, f1=(precision+recall)?2*precision*recall/(precision+recall):1, wcr=total?wrong/total:0;
+      return {version:'25.8.0',counts:{errors:total,caught,missed:total-caught,wrongCorrections:wrong,controls,falsePositives:fp},recall,precision,f1,falsePositiveRate:fpr,wrongCorrectionRate:wcr,valid:recall>=.95&&precision>=.99&&fpr<=.005&&wcr<=.002};
+    };
+
+    api.V25_8_PRO = Object.freeze({version:'25.8.0', edition:(baseApi.META||{}).edition, analyze:api.analyze, correct:api.correct, suggest:api.suggest, validate:api.validate, regression:api.runV258Regression, benchmark:api.runV258Benchmark, additiveOnly:true});
+    return Object.freeze(api);
+  }
+
+  const v258 = createApi(base);
+  if(typeof module === 'object' && module.exports) module.exports = v258;
+  g.ArabicProofreaderV18 = v258;
+  g.ArabicProofreaderV18PRO = v258;
+  g.V18 = v258;
+  g.ArabicProofreaderV19 = v258;
+  g.V19 = v258;
+  g.ArabicProofreaderV20 = v258;
+  g.V20 = v258;
+  g.ArabicProofreaderV25 = v258;
+  g.V25 = v258;
+  g.ArabicProofreaderV25PRO = v258;
+  g.V25PRO = v258;
+  g.ArabicProofreaderV258 = v258;
+  g.V258 = v258;
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+/* ======================== END V25.8 ========================= */
