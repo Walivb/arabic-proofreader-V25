@@ -494,10 +494,10 @@
 const META = Object.freeze({
   name: 'Arabic Proofreader Hybrid Engine',
   nameArabic: 'محرك التدقيق العربي الهجين — النسخة الاحترافية الشاملة',
-  version: '25.0.0',
+  version: '25.0.1',
   edition: 'PRO-FINAL-V25.0.0-CONTEXT-DECISION-SAFE',
   language: 'ar',
-  release: 'V25.0.0 PRO FINAL — Context-Aware Arabic Decision Engine / Completeness / Safety',
+  release: 'V25.0.1 PRO FINAL — Context-Aware Arabic Decision Engine / Precision-First Safety Hardening',
   stability: 'stable',
   releaseDate: '2026-08-27',
   governingPrinciple: 'عدم إفساد الجملة الصحيحة أهم من اكتشاف خطأ إضافي — توليدُ الاقتراح لا يعني قبولَه.',
@@ -14856,7 +14856,7 @@ function runV245ProductionCompleteness(context){
   for(const f of (context._findings||[])){ if(f && f.original==='يقرأ' && f.replacement==='تقرأ' && /\bمن\s+يقرأ\b/.test(text)){} }
   // ترقيم: سؤال، نقطتان، فاصلة/فاصلة منقوطة، حذف، شرطة، علامات مكررة، اقتباس/قوس.
   const qRe=/(?:^|[.!؟\n]\s*)(هل|متى|أين|كيف|لماذا|ماذا|أي|كم|من|ما)\s+[^.!؟\n]{1,120}\./gu;
-  while((m=qRe.exec(text))){ const p=m.index+m[0].length-1; add(p,1,'؟','V245P_QUESTION_COMPLETENESS','punctuation',.999,'الجملة استفهامية واضحة؛ تُختم بعلامة الاستفهام العربية.',['question-word','sentence-end'],true,'ترقيم'); }
+  while((m=qRe.exec(text))){ const p=m.index+m[0].length-1; if(!v25ClearQuestionAtStart(text,p) || v25IsProtected(context,p,1)) continue; add(p,1,'؟','V245P_QUESTION_COMPLETENESS','punctuation',.999,'الجملة تبدأ بأداة استفهام واضحة؛ تُختم بعلامة الاستفهام العربية.',['question-word','sentence-start','semantic-question'],true,'ترقيم'); }
   const colon=/\s+:/gu; while((m=colon.exec(text))){ add(m.index,m[0].length,':','V245P_COLON_NO_PRESPACE','spacing',.999,'لا توضع مسافة قبل النقطتين.',['punctuation-spacing'],true,'ترقيم'); }
   const colonAfter=/:(?!\s|$)/gu; while((m=colonAfter.exec(text))){ add(m.index+1,0,' ','V245P_COLON_SPACE_AFTER','spacing',.999,'توضع مسافة بعد النقطتين في النثر العادي.',['punctuation-spacing'],true,'ترقيم'); }
   const rep=/([؟!،؛])\1+/gu; while((m=rep.exec(text))){ add(m.index,m[0].length,m[1],'V245P_REPEATED_PUNCTUATION','spacing',.995,'تُوحّد علامات الترقيم المكررة في الوضع المحافظ.',['duplicate-punctuation'],true,'ترقيم'); }
@@ -15815,6 +15815,7 @@ function v2433SafeRoleRecall(context,findings){
     if(!/^3(?:ms|fs|mp|fp|md|fd)$/u.test(pc)) continue;
     let expected=null;
     if(sf.number==='pl' && sf.gender==='f') expected='3fp';
+    else if(sf.number==='pl' && sf.gender==='m' && sf.animacy==='nonhuman') expected='3fs';
     else if(sf.number==='pl' && sf.gender==='m') expected='3mp';
     else if(sf.number==='du') expected=sf.gender==='f'?'3fd':'3md';
     else if(sf.number==='sg' && sf.gender==='f') expected='3fs';
@@ -18255,6 +18256,19 @@ function v2443MafoolMutlaqSafety(context, findings){
   }
   return out;
 }
+function applyV25LegacySafetyV2501(context, findings){
+  const out=[];
+  const text=String(context.original||'');
+  for(const f of (findings||[])){
+    const id=String(f?.ruleId||'');
+    if((id==='V245_QUESTION_MARK_COMPLETENESS'||id==='V245P_QUESTION_COMPLETENESS'||id==='V245F_QUESTION_COMPLETENESS') && f.replacement==='؟'){
+      if(!v25ClearQuestionAtStart(text,Number(f.index))) continue;
+    }
+    if(id==='V2433_ROLE_SVO_AGREEMENT' && v25IsNonHumanPluralAgreementConflict(text,f)) continue;
+    out.push(f);
+  }
+  return out;
+}
 function v2443FinalWrongCorrectionVeto(context, findings){
   const kept=[], vetoed=[];
   for(const f of findings||[]){
@@ -18282,6 +18296,11 @@ function v2443FinalWrongCorrectionVeto(context, findings){
     effectiveFindings = v245FinalProductionRecall(context, effectiveFindings);
     context.v245ProductionRecallAdded = effectiveFindings.length;
   }
+
+  // V25.0.1 root-cause safety bridge for legacy findings. This is deliberately
+  // narrow: it blocks only two already-proven destructive patterns and leaves
+  // the legacy rule inventory, APIs, and recall paths intact.
+  effectiveFindings = applyV25LegacySafetyV2501(context, effectiveFindings);
 
   const ranked = rankAndClassify(effectiveFindings, context.options, context);
   ranked.suppressed.push(...v243Phase2.suppressed.map(x => x.finding));
@@ -23579,7 +23598,15 @@ function runV24AdditionBenchmarkV24(engine = {analyze}, options = {}) {
 
 
 /* ==========================================================================\n * V25.0.0 PRO FINAL — CENTRAL DECISION ENGINE\n * --------------------------------------------------------------------------\n * السياسة: additive + root-cause + backward-compatible.\n * القواعد القديمة تولّد المرشحين؛ هذه الطبقة وحدها تحسم ما يظهر وما يُطبَّق.\n * ========================================================================== */
-const V25_VERSION = '25.0.0';
+/* V25.0.1 precision-first hardening:
+ * - no implicit-mood promotion without an explicit governor proof
+ * - standalone «لي» is not a jussive marker
+ * - dependent masculine sound-plural agreement is resolved from the head
+ * - structural alternative repairs are withheld instead of guessed
+ * - overlapping candidate spans are conflict-resolved, not independently applied
+ * - benchmark auto-correction precision is measured on exact end-to-end golds
+ */
+const V25_VERSION = '25.0.1';
 const V25_DECISION_TIERS = Object.freeze({
   CERTAIN: 0.995,
   HIGH: 0.975,
@@ -23642,7 +23669,8 @@ const V25_GOLD_CORPUS = Object.freeze([
   {id:'v25-punct-001',text:'هل تذهب.',expected:'؟'},
   {id:'v25-punct-002',text:'أين تذهب.',expected:'؟'},
   {id:'v25-case-001',text:'لا رجلٌ في البيت.',expected:'رجلَ'},
-  {id:'v25-case-002',text:'مررت بمعلمون.',expected:'بمعلمين'}
+  {id:'v25-case-002',text:'مررت بمعلمون.',expected:'بمعلمين'},
+  {id:'v25-dependent-001',text:'حضر المعلمين المجتهدين.',expected:'المجتهدون'}
 ]);
 const V25_BLOCK_CORPUS = Object.freeze([
   'قرأ الطالب الكتاب.', 'المؤمن يدعو ربه.', 'الرسامات رسمن اللوحة.',
@@ -23650,7 +23678,32 @@ const V25_BLOCK_CORPUS = Object.freeze([
   'من يجتهد ينجح.', 'ما زال الطلاب يكتبون.',
   'الذين حضروا ناجحون.', 'أعطى المعلمُ الطالبَ كتابًا.',
   'كُتِبَ الدرسُ.', 'هل تذهب؟', 'قال: اذهب.', '«نص صحيح»',
-  'المعلمون كتبوا الدرس.', 'الطالبان كتبا الدرس.'
+  'المعلمون كتبوا الدرس.', 'الطالبان كتبا الدرس.',
+  // V25.0.1 adversarial controls: structurally similar to errors but linguistically valid.
+  'بدأ الطلاب يكتبون الدرس.', 'بدأ الطالب يكتب الدرس.',
+  'شرع العمال يعملون في المشروع.', 'طفق الطفل يضحك.',
+  'استمر الزوار يتدفقون.', 'كاد الطالب ينجح.',
+  'أوشك المطر ينزل.', 'عسى الفريق يفوز.',
+  'قال لي يكتبون الدرس.', 'قال لي تكتبين الرسالة.',
+  'أرسل لي يكتبون الدرس.', 'رأيت الطالبين يكتبان الدرس.',
+  'رأيت الطالبين المجتهدين يكتبون الدرس.', 'الكتب وصلت أمس.',
+  'الرسائل وصلت أمس.', 'الأشجار كبرت بسرعة.',
+  'جاء المعلمون المجتهدون.',
+  'حضر المهندسون الماهرون.', 'من يجتهد ينجح.'
+]);
+
+/* Exact end-to-end auto-correction gold. This benchmark deliberately uses
+ * complete expected outputs, not a single expected token, so unrelated safe
+ * edits can no longer be miscounted as wrong automatic corrections. */
+const V25_AUTO_GOLD_CORPUS = Object.freeze([
+  {id:'v25-auto-001', text:'المدرسه.', expectedCorrected:'المدرسة.'},
+  {id:'v25-auto-002', text:'الى النجاح.', expectedCorrected:'إلى النجاح.'},
+  {id:'v25-auto-003', text:'الان نبدأ.', expectedCorrected:'الآن نبدأ.'},
+  {id:'v25-auto-004', text:'إستفاد الطالب.', expectedCorrected:'استفاد الطالب.'},
+  {id:'v25-auto-005', text:'توصلو إلى النتيجة.', expectedCorrected:'توصلوا إلى النتيجة.'},
+  {id:'v25-auto-006', text:'هل تذهب.', expectedCorrected:'هل تذهب؟'},
+  {id:'v25-auto-007', text:'أين تذهب.', expectedCorrected:'أين تذهب؟'},
+  {id:'v25-auto-008', text:'كتاباً مفيداً.', expectedCorrected:'كتابًا مفيدًا.'}
 ]);
 
 function v25IsNonHumanPluralAgreementConflict(text, finding){
@@ -23815,21 +23868,43 @@ function v25AddAgreement(context, out, seen){
   }
 }
 
-function v25AddApproximation(context, out, seen){
-  const text=String(context.original||'');
-  // Commencement/continuative verbs that license an imperfect dependent verb.
-  const re=/(?:^|[^\u0600-\u06FF])(يشرعون|يأخذون|يستمرون|بدأ|بدأت|شرع|شرعت|طفق|طفقوا)[َُِْ]?\s+(?:ال[\u0600-\u06FF]+\s+)?(يكتبون|يعملون|يدرسون|يجتهدون|يقرؤون|يتعلمون)(َ)?(?=$|[^\u0600-\u06FF])/gu;
-  let m;
-  const map={يكتبون:'يكتبوا',يعملون:'يعملوا',يدرسون:'يدرسوا',يجتهدون:'يجتهدوا',يقرؤون:'يقرؤوا',يتعلمون:'يتعلموا'};
-  while((m=re.exec(text))){
-    const dep=m[2]; const repl=map[dep]; if(!repl) continue;
-    const start=m.index+(m[0].indexOf(dep));
-    if(v25IsProtected(context,start,dep.length)) continue;
-    const f=v25Finding(context,{start,length:dep.length,replacement:repl,ruleId:'V25_APPROXIMATION_SUBJUNCTIVE',type:'نحوي',classification:'mood',confidence:.998,
-      explanation:'فعل الشروع/المواصلة يتلوه مضارع في تركيب حسمته القاعدة؛ جرى اعتماد الصورة المنصوبة بحذف نون الأفعال الخمسة.',
-      evidence:['commencement-or-continuative-verb','dependent-imperfect','five-verbs','same-clause'],safe:false,metadata:{v25:true,roleResolved:true}});
+function v25AddResolvedDependentAgreement(context, out, seen){
+  const toks=context.tokens||[];
+  const subjectHeads=(out||[]).filter(f=>{
+    const id=String(f.ruleId||'');
+    return /^(?:V25_SUBJECT_SMP_NOMINATIVE|V25_VSO_SMP_NOMINATIVE|V25_KANA_SMP_NOMINATIVE|V25_KANA_SUBJECT_NOMINATIVE)$/u.test(id)
+      && /ون$/u.test(String(f.replacement||''));
+  });
+  for(const headFinding of subjectHeads){
+    const headIdx=toks.findIndex(t=>Number(t.start)===Number(headFinding.index));
+    if(headIdx<0) continue;
+    const head=toks[headIdx];
+    let j=headIdx+1;
+    const headEnd=Number(headFinding.index)+Number(headFinding.length);
+    if(!toks[j] || Number(toks[j].start)<headEnd) continue;
+    const adj=toks[j];
+    const adjPos=String(adj?.morph?.pos||adj?.pos||'');
+    if(adjPos!=='adj') continue;
+    const surface=String(adj.surface||'');
+    if(!/ين$/u.test(surface)) continue;
+    const repl=surface.slice(0,-2)+'ون';
+    if(!repl || repl===surface || v25IsProtected(context,Number(adj.start),Number(adj.end)-Number(adj.start))) continue;
+    const f=findingFromSpan(context,{startToken:adj,replacement:repl,ruleId:'V25_DEPENDENT_SMP_NOMINATIVE',type:'نحوي',classification:'agreement',confidence:.995,
+      explanation:'رأس المجموعة حُسم فاعلًا/اسمَ ناسخٍ جمعَ مذكر سالم مرفوعًا؛ النعت التابع يتبعه في الرفع والعدد.',
+      evidence:['subject-role-resolved','smp-head-nominative','adjective-dependent','number-agreement','local-clause'],safe:false,
+      metadata:{v25:true,roleResolved:true,headIndex:headIdx,dependentIndex:j,headReplacement:headFinding.replacement}});
     const k=`${f.index}|${f.length}|${f.replacement}`; if(!seen.has(k)){seen.add(k);out.push(f);}
   }
+}
+
+function v25AddApproximation(context, out, seen){
+  /*
+   * Precision-first policy: an unvocalized dependent imperfect after a verb of
+   * approach/commencement/hope does not by itself license a visible mood edit.
+   * The legacy V20/V24 generator is retained for diagnostics, but V25 does not
+   * promote implicit-governor hypotheses to user-facing corrections.
+   */
+  return;
 }
 
 function v25AddJussive(context, out, seen){
@@ -23841,8 +23916,8 @@ function v25AddJussive(context, out, seen){
     const prev2=stripDiacritics(toks[i-2]?.morph?.core||toks[i-2]?.surface||'');
     let repl=null;
     if(prev==='لا' || c==='ليكتبون' || c==='وليكتبون') repl={تهملون:'تهملوا',تفعلون:'تفعلوا',تكتبون:'تكتبوا',يكتبون:'يكتبوا',يفعلون:'يفعلوا',تفعلين:'تفعلي',تكتبين:'تكتبي',ليكتبون:'ليكتبوا',وليكتبون:'وليكتبوا'}[c];
-    if(prev==='لي' || prev==='لِ') repl=c.endsWith('ون')?c.slice(0,-2)+'وا':(c.endsWith('ين')?c.slice(0,-2)+'ي':null);
-    if(prev2==='و' && prev==='لي') repl='ولي'+c.slice(0,-2)+'وا';
+    // Standalone «لي» is treated as preposition + 1st-person pronoun by default.
+    // Lām al-amr is handled only when attached to the imperfect surface below.
     if(repl) {
       const f=findingFromSpan(context,{startToken:t,replacement:repl,ruleId:'V25_JUSSIVE_FIVE_VERBS',type:'نحوي',classification:'mood',confidence:.998,
         explanation:'أداة الجزم حُسمت محليًا، وفعل الأفعال الخمسة يُجزم بحذف النون.',evidence:['jussive-particle','five-verbs','same-clause'],safe:false,metadata:{v25:true,roleResolved:true}});
@@ -23891,13 +23966,114 @@ function v25AddPunctuation(context, out, seen){
   }
 }
 
+function v25TokenIndexForFinding(context,f){
+  const s=Number(f?.index); const e=s+Number(f?.length||0);
+  const toks=context.tokens||[];
+  let best=-1; let bestSpan=Infinity;
+  for(let i=0;i<toks.length;i++){
+    const t=toks[i]; const ts=Number(t.start), te=Number(t.end);
+    if(ts===s){ return i; }
+    if(ts<e && te>s){ const span=Math.max(0,te-ts); if(span<bestSpan){best=i;bestSpan=span;} }
+  }
+  return best;
+}
+function v25SameSentence(context,a,b){
+  const ai=v25TokenIndexForFinding(context,a), bi=v25TokenIndexForFinding(context,b);
+  if(ai<0 || bi<0) return false;
+  return Number(context.tokens?.[ai]?.sentence??-1)===Number(context.tokens?.[bi]?.sentence??-2);
+}
+function v25IsObjectCaseCandidate(f){
+  return /(?:OBJECT_CASE|ZANNA_OBJECT_CASE|DITRANSITIVE_OBJECT1_CASE)$/u.test(String(f.ruleId||''));
+}
+function v25IsAgreementCandidate(f){
+  return /(?:SVO_AGREEMENT(?:_RECALL)?|ROLE_GRAPH_AGREEMENT|SUBJECT_VERB_AGREEMENT)$/u.test(String(f.ruleId||''));
+}
+function v25ObjectAntecedentAgreementAmbiguity(context, finding){
+  if(!v25IsAgreementCandidate(finding)) return false;
+  const vi=v25TokenIndexForFinding(context,finding);
+  if(vi<0) return false;
+  const toks=context.tokens||[];
+  const verb=toks[vi];
+  const orig=stripDiacritics(String(finding?.original||verb?.surface||''));
+  const repl=stripDiacritics(String(finding?.replacement||''));
+  if(!/ون$/u.test(orig) || !/ان$/u.test(repl)) return false;
+  // Use the already resolved object graph as the positive evidence. The noun
+  // may be followed by one or two adjectives before the verb, so do not require
+  // adjacency. A single valid plural-object antecedent is enough to block an
+  // otherwise aggressive plural→dual agreement repair.
+  for(const r of (context.syntax?.objectRelations||[])){
+    const oi=Number(r.objectIndex), ov=Number(r.verbIndex);
+    if(!Number.isInteger(oi) || oi<0 || oi>=vi || ov>=vi || Number(r.confidence||0)<.9) continue;
+    const obj=toks[oi];
+    if(!obj || Number(obj.sentence)!==Number(verb?.sentence)) continue;
+    if(vi-oi<1 || vi-oi>4) continue;
+    const surface=stripDiacritics(String(obj.surface||obj.clean||''));
+    if(/ين$/u.test(surface)) return true;
+  }
+  return false;
+}
+function v25StructuralCompetitionVeto(context, findings){
+  const kept=[]; const withheld=[]; const marked=new Set();
+  const toks=context.tokens||[];
+  for(let i=0;i<(findings||[]).length;i++){
+    const a=findings[i]; if(marked.has(a)) continue;
+    if(!v25IsObjectCaseCandidate(a)) continue;
+    const nounIdx=v25TokenIndexForFinding(context,a);
+    if(nounIdx<0) continue;
+    const objectRelations=(context.syntax?.objectRelations||[]).filter(r=>Number(r.objectIndex)===nounIdx && Number(r.confidence||0)>=.9);
+    if(!objectRelations.length) continue;
+    const subjectRelations=(context.syntax?.subjectRelations||[]).filter(r=>Number(r.subjectIndex)===nounIdx && Number(r.confidence||0)>=.9);
+    if(!subjectRelations.length) continue;
+    for(let j=0;j<(findings||[]).length;j++){
+      if(i===j) continue; const b=findings[j];
+      if(!v25IsAgreementCandidate(b) || !v25SameSentence(context,a,b)) continue;
+      const verbIdx=v25TokenIndexForFinding(context,b);
+      if(verbIdx<0) continue;
+      if(!subjectRelations.some(r=>Number(r.verbIndex)===verbIdx)) continue;
+      if(!objectRelations.some(r=>Number(r.verbIndex)!==verbIdx)) continue;
+      const nounTok=toks[nounIdx];
+      const targetVerb=toks[verbIdx];
+      const nounSurface=stripDiacritics(String(nounTok?.surface||''));
+      const verbSurface=stripDiacritics(String(targetVerb?.surface||''));
+      // A post-object verbal clause can legitimately use the object's plural
+      // antecedent («رأيت الطالبين ... يكتبون»). If «ين» is unresolved here,
+      // never force it to dual merely because the analyzer picked one reading.
+      if(/ين$/u.test(nounSurface) && /ون$/u.test(verbSurface)){
+        a.decisionClass='ABSTAINED'; a.requiresReview=true; a.autoCorrectable=false; a.safeCandidate=false; a.recommendedAction='abstain';
+        a.v25VetoReason='مرشح مطابقة الفعل قائم على قراءة ثنائية غير محسومة لصيغة «ـين» وهي مفعول لفاعل سابق؛ القراءة الجمعية البديلة مشروعة.';
+        b.decisionClass='ABSTAINED'; b.requiresReview=true; b.autoCorrectable=false; b.safeCandidate=false; b.recommendedAction='abstain';
+        b.v25VetoReason=a.v25VetoReason;
+        withheld.push(a,b); marked.add(a); marked.add(b);
+        break;
+      }
+      const reason='بنية الجملة تسمح بإصلاحين بنيويين مستقلين (إعراب الاسم أو مطابقة الفعل)؛ لا يمكن حسم القراءة من النص غير المشكول.';
+      for(const f of [a,b]){
+        f.decisionClass='ABSTAINED'; f.requiresReview=true; f.autoCorrectable=false; f.safeCandidate=false; f.recommendedAction='abstain';
+        f.v25VetoReason=reason; withheld.push(f); marked.add(f);
+      }
+      break;
+    }
+  }
+  for(const f of (findings||[])) if(!marked.has(f)) kept.push(f);
+  return {kept,withheld};
+}
+function v25UnsafeOverlap(a,b){
+  const as=Number(a.index), ae=as+Math.max(1,Number(a.length||0));
+  const bs=Number(b.index), be=bs+Math.max(1,Number(b.length||0));
+  return Math.max(as,bs)<Math.min(ae,be);
+}
+
 function v25DecisionScore(f){
   let c=Number.isFinite(Number(f.confidence))?Number(f.confidence):0.75;
-  const ev=Array.isArray(f.evidence)?f.evidence.length:0;
   const meta=f.metadata||{};
-  const bonus=Math.min(.012, ev*.002 + (meta.reviewed?.004:0));
-  const penalty=(meta.ambiguous?.05:0) + (f.manualOnly?.02:0);
-  return Math.max(0,Math.min(.9999,c+bonus-penalty));
+  // Confidence is evidence-derived, not an evidence-count bonus. Strong
+  // metadata may protect a reviewed candidate, while ambiguity can only lower it.
+  if(meta.ambiguous===true) c-=.05;
+  if(f.manualOnly===true) c-=.02;
+  if(meta.roleResolved===true) c+=.001;
+  if(meta.reviewed===true) c+=.001;
+  if(!Array.isArray(f.evidence) || f.evidence.length===0) c-=.01;
+  return Math.max(0,Math.min(.9999,c));
 }
 function v25Classify(f, score, margin){
   f.decisionScore=Number(score.toFixed(4)); f.decisionMargin=Number(Math.max(0,margin).toFixed(4));
@@ -23915,33 +24091,34 @@ function v25Classify(f, score, margin){
   return f;
 }
 function V25ConflictResolver(context, findings){
-  const groups=new Map();
+  const uniqueMap=new Map(); const exactAbstained=[];
   for(const f of (findings||[])){
-    const key=`${Number(f.index)}|${Number(f.length)}`;
-    if(!groups.has(key)) groups.set(key,[]);
-    groups.get(key).push(f);
+    const key=`${f.index}|${f.length}|${f.replacement}`;
+    const old=uniqueMap.get(key);
+    if(!old || v25DecisionScore(f)>v25DecisionScore(old)) uniqueMap.set(key,f);
   }
-  const kept=[], abstained=[];
-  for(const list of groups.values()){
-    const unique=new Map();
-    for(const f of list){
-      const k=String(f.replacement||'');
-      const old=unique.get(k);
-      if(!old || v25DecisionScore(f)>v25DecisionScore(old)) unique.set(k,f);
+  const ranked=[...uniqueMap.values()].sort((a,b)=>v25DecisionScore(b)-v25DecisionScore(a));
+  const kept=[]; const abstained=[];
+  for(const f of ranked){
+    let conflict=null;
+    for(const k of kept){
+      if(!v25UnsafeOverlap(f,k)) continue;
+      if(Number(f.index)===Number(k.index) && Number(f.length)===Number(k.length)){ conflict=k; break; }
+      conflict=k; break;
     }
-    const ranked=[...unique.values()].sort((a,b)=>v25DecisionScore(b)-v25DecisionScore(a));
-    if(!ranked.length) continue;
-    const best=ranked[0], second=ranked[1];
-    const s1=v25DecisionScore(best), s2=second?v25DecisionScore(second):0, margin=s1-s2;
-    if(second && margin<.02){
-      for(const f of ranked){ f.decisionClass='ABSTAINED'; f.requiresReview=true; f.autoCorrectable=false; f.safeCandidate=false; f.recommendedAction='abstain'; f.decisionMargin=Number(margin.toFixed(4)); abstained.push(f); }
-      continue;
+    if(!conflict){ kept.push(f); continue; }
+    const delta=v25DecisionScore(conflict)-v25DecisionScore(f);
+    if(Number(f.index)===Number(conflict.index) && Number(f.length)===Number(conflict.length) && delta<.02){
+      const idx=kept.indexOf(conflict); if(idx>=0) kept.splice(idx,1);
+      for(const x of [conflict,f]){ x.decisionClass='ABSTAINED'; x.requiresReview=true; x.autoCorrectable=false; x.safeCandidate=false; x.recommendedAction='abstain'; x.decisionMargin=Number(Math.max(0,delta).toFixed(4)); x.v25VetoReason='تعارض مباشر بين بديلين على النطاق نفسه؛ لا يوجد فاصل ثقة كافٍ.'; abstained.push(x); }
+    } else {
+      f.vetoed=true; f.vetoReason='V25 conflicting overlapping candidate lost to a higher-scoring alternative'; f.decisionClass='ABSTAINED'; f.requiresReview=true; f.autoCorrectable=false; f.safeCandidate=false; f.recommendedAction='abstain'; f.decisionMargin=Number(Math.max(0,delta).toFixed(4)); abstained.push(f);
     }
-    v25Classify(best,s1,margin); kept.push(best);
-    for(const f of ranked.slice(1)){ f.vetoed=true; f.vetoReason='V25 conflicting candidate lost to a higher-scoring alternative'; f.decisionClass='ABSTAINED'; f.requiresReview=true; f.autoCorrectable=false; f.safeCandidate=false; abstained.push(f); }
   }
-  return {kept,abstained};
+  for(const f of kept){ if(!f.decisionClass || f.decisionClass==='ABSTAINED') v25Classify(f,v25DecisionScore(f),.05); }
+  return {kept,abstained:exactAbstained.concat(abstained)};
 }
+
 function V25CandidateRegistry(findings){
   const map=new Map(), duplicates=[];
   for(const f of (findings||[])){
@@ -23973,7 +24150,7 @@ function v25BuildResult(context, legacy, finalFindings, abstained){
     suggestions:visible.filter(f=>!f.autoCorrectable), manualReview:visible.filter(f=>f.requiresReview),
     autoCorrectable:safe, abstained,
     decision:{engine:'V25DecisionEngine',version:'1.0',candidateCount:visible.length+abstained.length,
-      accepted:visible.length,abstained:abstained.length,formula:'CERTAIN ∧ NO_CONFLICT ∧ NO_PROTECTED_SPAN ∧ NO_STRUCTURAL_CHANGE'},
+      accepted:visible.length,abstained:abstained.length,formula:'CERTAIN ∧ NO_CONFLICT ∧ NO_PROTECTED_SPAN ∧ NO_STRUCTURAL_CHANGE ∧ UNIQUE_READING'},
     stats:{...(legacy.stats||{}),...stats}, v25:true
   };
 }
@@ -23992,6 +24169,7 @@ function analyzeV25(text, options={}){
   v25AddOrthography(context,candidates,seen);
   v25AddSubjectCase(context,candidates,seen);
   v25AddAgreement(context,candidates,seen);
+  v25AddResolvedDependentAgreement(context,candidates,seen);
   v25AddApproximation(context,candidates,seen);
   v25AddJussive(context,candidates,seen);
   v25AddPunctuation(context,candidates,seen);
@@ -24015,13 +24193,34 @@ function analyzeV25(text, options={}){
     if(!id.startsWith('DIACRITICS_V1890')) return true;
     return !(candidates.some(g=>String(g.ruleId||'')==='V25_ORTHOGRAPHY_REVIEWED' && Number(g.index)<=Number(f.index) && Number(g.index)+Number(g.length)>=Number(f.index)+Number(f.length)));
   });
-  // The central registry deduplicates first; conflict resolution then decides.
+  // Structural alternatives must be withheld before scoring: a noun-case repair
+  // and a later verb-agreement repair can be two different valid readings.
+  const structural=v25StructuralCompetitionVeto(context,candidates);
+  candidates=structural.kept;
+  const preWithheld=structural.withheld;
+  // The central registry deduplicates first; overlap-aware conflict resolution then decides.
   const registry=V25CandidateRegistry(candidates);
   const resolved=V25ConflictResolver(context,registry.unique);
   for(const f of resolved.kept){ f.v25CandidateRegistry=true; }
-  const result=v25BuildResult(context,legacy,resolved.kept,resolved.abstained.map(f=>({...f,decisionReason:f.vetoReason||'ضعف هامش القرار أو تعارض مرشحين'})));
+  const allAbstained=[...preWithheld,...resolved.abstained].map(f=>({...f,decisionReason:f.v25VetoReason||f.vetoReason||'ضعف هامش القرار أو تعارض مرشحين'}));
+  // Final gate: re-check protected spans and explicit ambiguity after conflict resolution.
+  const finalKept=[];
+  for(const f of resolved.kept){
+    const reasons=[];
+    if(v25IsProtected(context,Number(f.index),Number(f.length))) reasons.push('protected-span');
+    if(f.structuralChange===true) reasons.push('structural-change');
+    if(String(f.ruleId||'')==='V25_APPROXIMATION_SUBJUNCTIVE') reasons.push('implicit-governor-not-proven');
+    if(String(f.ruleId||'')==='V25_JUSSIVE_FIVE_VERBS'){
+      const ti=v25TokenIndexForFinding(context,f), prev=ti>0?stripDiacritics(context.tokens[ti-1]?.surface||''):'';
+      if(prev==='لي' || prev==='لِ') reasons.push('standalone-li-is-preposition-pronoun');
+    }
+    if(v25ObjectAntecedentAgreementAmbiguity(context,f)) reasons.push('plural-object-antecedent-reading-is-valid');
+    if(reasons.length){ f.decisionClass='ABSTAINED'; f.requiresReview=true; f.autoCorrectable=false; f.safeCandidate=false; f.recommendedAction='abstain'; f.v25VetoReason='بوابة السلامة النهائية: '+reasons.join(', '); allAbstained.push({...f,decisionReason:f.v25VetoReason}); }
+    else finalKept.push(f);
+  }
+  const result=v25BuildResult(context,legacy,finalKept,allAbstained);
   result.stats.duplicatesRemoved=registry.duplicates.length;
-  result.decision.candidateCount=(candidates||[]).length;
+  result.decision.candidateCount=(candidates||[]).length+preWithheld.length+resolved.abstained.length;
   result.decision.duplicatesRemoved=registry.duplicates.length;
   return result;
 }
@@ -24074,6 +24273,7 @@ function runRegressionSuiteV25(options={}){
 function runBenchmarkV25(options={}){
   const gold=V25_GOLD_CORPUS, controls=V25_BLOCK_CORPUS;
   let caught=0,fp=0,wrong=0,autoAttempts=0,autoCorrectGood=0,abstained=0,candidateTotal=0,duplicatesRemoved=0,protectedViolations=0;
+  let autoGoldCases=0, autoGoldCasesGood=0;
   const rows=[];
   const evalOne=(t,textType)=>{
     const r=analyzeV25(t.text||t,{safeMode:true,...options});
@@ -24110,18 +24310,25 @@ function runBenchmarkV25(options={}){
     const r=evalOne({text},'control');
     if((r.autoCorrectable||[]).length) controlAutoViolations += r.autoCorrectable.length;
   }
+  for(const t of V25_AUTO_GOLD_CORPUS){
+    const r=analyzeV25(t.text,{safeMode:true,...options});
+    if((r.autoCorrectable||[]).length || r.corrected!==r.original){
+      autoGoldCases++;
+      if(String(r.corrected||'')===String(t.expectedCorrected)) autoGoldCasesGood++;
+    }
+  }
   const recall=gold.length?caught/gold.length:0;
   const precision=(caught+fp)?caught/(caught+fp):1;
   const fpr=controls.length?fp/controls.length:0;
   const wrongRate=gold.length?wrong/gold.length:0;
   const f1=(precision+recall)?(2*precision*recall)/(precision+recall):0;
-  const autoPrecision=autoAttempts?autoCorrectGood/autoAttempts:1;
+  const autoPrecision=autoGoldCases?autoGoldCasesGood/autoGoldCases:1;
   const abstentionRate=candidateTotal?abstained/candidateTotal:0;
   const duplicateRate=(candidateTotal+duplicatesRemoved)?duplicatesRemoved/(candidateTotal+duplicatesRemoved):0;
   const protectedRate=(candidateTotal)?protectedViolations/candidateTotal:0;
   const controlPenalty=controlAutoViolations>0 ? controlAutoViolations : 0;
   const regressionPassRate=(gold.length+controls.length)?((gold.length+controls.length-rows.length)/(gold.length+controls.length)):1;
-  const valid=precision>=.995 && recall>=.98 && fpr<=.002 && wrongRate<=.001 && controlAutoViolations===0 && protectedRate===0;
+  const valid=precision>=.995 && recall>=.98 && fpr<=.002 && wrongRate<=.001 && controlAutoViolations===0 && protectedRate===0 && autoPrecision>=.995;
   return {version:V25_VERSION,valid,counts:{errors:gold.length,controls:controls.length,caught,missed:gold.length-caught,falsePositives:fp,wrongCorrections:wrong,autoCorrectionAttempts:autoAttempts,controlAutoViolations:controlPenalty},recall,precision,f1,falsePositiveRate:fpr,wrongCorrectionRate:wrongRate,autoCorrectionPrecision:autoPrecision,abstentionRate,duplicateRate,protectedSpanViolationRate:protectedRate,regressionPassRate,targets:{precision:.995,recall:.98,falsePositiveRate:.002,wrongCorrectionRate:.001,autoCorrectionPrecision:.995},rows};
 }
 function runFullSuiteV25(options={}){
@@ -24398,7 +24605,7 @@ function validateV25(options={}){
     veto: applyV23GovernanceV23,
     diacritize: diacritizeV20}),
   // ── V25.0.0 PRO FINAL — Context-Aware Arabic Decision Engine ──
-  V25_GOLD_CORPUS, V25_BLOCK_CORPUS, V25_DECISION_TIERS, V25CandidateRegistry, V25ConflictResolver,
+  V25_GOLD_CORPUS, V25_BLOCK_CORPUS, V25_AUTO_GOLD_CORPUS, V25_DECISION_TIERS, V25CandidateRegistry, V25ConflictResolver,
   analyze: analyzeV25, check: analyzeV25, correct: correctV25, suggest: suggestV25,
   correctSafe: correctSafeV25, parse: parseV25, diacritize: diacritizeV25,
   inspectPOS: inspectPOSV25, inspectSyntax: inspectSyntaxV25, inspectDependencies: inspectDependenciesV25,
