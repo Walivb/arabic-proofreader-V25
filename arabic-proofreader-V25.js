@@ -1,8 +1,8 @@
 /*!
  * ============================================================================
- *  Arabic Proofreader V25.0.0 PRO FINAL — Blogger/GitHub Standalone Bundle
+ *  Arabic Proofreader V25.3.0 PRO FINAL — Blogger/GitHub Standalone Bundle
  *  ────────────────────────────────────────────────────────────────────────
- *  V25.0.0 PRO FINAL (2026-08-27) — Context-Aware Decision + Completeness + Safety
+ *  V25.3.0 PRO FINAL (2026-08-28) — Recall Gap Hardening + Context-Aware Decision + Safety
  *  ────────────────────────────────────────────────────────────────────────
  *  ما أُضيف في V23 فوق المنظومة الكاملة لـ V22 (الحفظُ التام لكل V22):
  *    ▸ SemanticSyntacticVeto 1.0 — طبقة القرار النحوي الصارمة:
@@ -453,8 +453,12 @@
       root.V24_4_3 = api;
     root.ArabicProofreaderV25 = api;
     root.ArabicProofreaderV25PRO = api;
+    root.ArabicProofreaderV25_3 = api;
+    root.ArabicProofreaderV25_3PRO = api;
     root.V25 = api;
+    root.V25_3 = api;
     root.__ARABIC_PROOFREADER_V25_READY__ = true;
+    root.__ARABIC_PROOFREADER_V25_3_READY__ = true;
     // علامة جاهزية صريحة يمكن للقالب فحصها قبل بدء التدقيق
     root.__ARABIC_PROOFREADER_V18_READY__ = true;
     root.__ARABIC_PROOFREADER_V19_READY__ = true;
@@ -494,10 +498,10 @@
 const META = Object.freeze({
   name: 'Arabic Proofreader Hybrid Engine',
   nameArabic: 'محرك التدقيق العربي الهجين — النسخة الاحترافية الشاملة',
-  version: '25.2.0',
-  edition: 'PRO-FINAL-V25.0.0-CONTEXT-DECISION-SAFE',
+  version: '25.3.0',
+  edition: 'PRO-FINAL-V25.3.0-RECALL-GAP-HARDENED',
   language: 'ar',
-  release: 'V25.2.0 FINAL — Context-Aware Arabic Decision Engine / Precision-First Safety Hardening + V25.1 Independent Hardening (dead-rule root fixes, generalized jussive/VSO/orthography lexicon, negation-vs-prohibition arbitration)',
+  release: 'V25.3.0 PRO FINAL — Recall Gap Hardening / additive-only, root-cause recall recovery, strict regression preservation',
   stability: 'stable',
   releaseDate: '2026-08-27',
   governingPrinciple: 'عدم إفساد الجملة الصحيحة أهم من اكتشاف خطأ إضافي — توليدُ الاقتراح لا يعني قبولَه.',
@@ -638,7 +642,8 @@ const META = Object.freeze({
     'v24.5-grammar-completeness-1.0', 'v24.5-semantic-punctuation-1.0',
     'v24.5-production-completeness-1.0',
     'v24.5-role-graph-safety-1.0',
-    'v24.5-decision-ambiguity-margin-1.0'
+    'v24.5-decision-ambiguity-margin-1.0',
+    'v25.3-recall-gap-layer-1.0'
   ]),
   resolverVersions: Object.freeze({
     ClauseIsolationResolver: '1.2',
@@ -23798,7 +23803,7 @@ function runV24AdditionBenchmarkV24(engine = {analyze}, options = {}) {
  * - overlapping candidate spans are conflict-resolved, not independently applied
  * - benchmark auto-correction precision is measured on exact end-to-end golds
  */
-const V25_VERSION = '25.2.0';
+const V25_VERSION = '25.3.0';
 const V25_DECISION_TIERS = Object.freeze({
   CERTAIN: 0.995,
   HIGH: 0.975,
@@ -24463,6 +24468,187 @@ const _V24_SUGGEST = suggest;
  * سلوك كل نقاط الدخول: الواجهة العامة، analyzePRO، حزم الانحدار، المعايير
  * الخارجية، وتطبيقات HTML/Blogger. كان انفصام المسارين سبب فشل
  * runFullSuiteV25 (recall=0.975 خارجيًا وprecision=0.88 في معيار V23). */
+
+/* ============================================================================
+ * V25.3.0 PRO — Recall Gap Hardening Layer 1.0
+ * Goal: recover only independently verified, high-precision misses that are
+ * either absent from the legacy rule set or fail to reach a usable candidate.
+ *
+ * Policy:
+ *   - additive only; no legacy rule is removed or rewritten
+ *   - no broad heuristic over arbitrary Arabic words
+ *   - each new rule has a narrow trigger and an explicit regression corpus
+ *   - grammar additions remain review-only; orthographic additions are safe
+ *     only where the target is deterministic and lexically verified
+ * ========================================================================== */
+
+const V253_TANWIN_ALIF_MAP = Object.freeze({
+  'شيئا': 'شيئًا',
+  'جزءا': 'جزءًا', 'عبئا': 'عبئًا', 'دفئا': 'دفئًا', 'ملئا': 'ملئًا',
+  'بدءا': 'بدءًا',
+  'مساءا': 'مساءً', 'سماءا': 'سماءً', 'دعاءا': 'دعاءً',
+  'بناءا': 'بناءً', 'لقاءا': 'لقاءً', 'جزاءا': 'جزاءً',
+  'رجاءا': 'رجاءً', 'شفاءا': 'شفاءً', 'ثناءا': 'ثناءً',
+  'وفاءا': 'وفاءً', 'صفاءا': 'صفاءً', 'ابتداءا': 'ابتداءً',
+  'انتهاءا': 'انتهاءً'
+});
+
+/* Small, reviewed lexical gap list. These are spelling forms with one intended
+ * canonical target; they are deliberately not generalized with a morphology-
+ * blind ة/ه rewrite. */
+const V253_REVIEWED_ORTHOGRAPHY = Object.freeze({
+  'الكره':'الكرة', 'كره':'كرة',
+  'التنميه':'التنمية', 'تنميه':'تنمية',
+  'الاداريه':'الإدارية', 'اداريه':'إدارية',
+  'المراه':'المرأة', 'مراه':'مرأة',
+  'المرأه':'المرأة', 'مرأه':'مرأة',
+  'المساله':'المسألة', 'مساله':'مسألة',
+  'المنشأه':'المنشأة', 'منشأه':'منشأة',
+  'الاكاديميه':'الأكاديمية', 'اكاديميه':'أكاديمية',
+  'الاستراتيجيه':'الاستراتيجية', 'استراتيجيه':'استراتيجية'
+});
+
+const V253_OBJECT_SMP_VERBS = Object.freeze(new Set([
+  'رأيت','شاهدت','قابلت','زرت','قرأت','حفظت','راجعت','شجعت','ساعدت',
+  'كافأت','كرمت','أكرمت','احترمت','أهنت','سألت','دعوت','رافقت',
+  'قابلت','حاورت','قارنت','عالجت','لاحظت','تابعت','استقبلت','ودعت'
+]));
+
+function v253AddRecallOrthography(context, out, seen){
+  const text=String(context.original||'');
+  const add=(start,bad,good,id,explanation,evidence)=>{
+    if(!bad || !good || bad===good) return;
+    if(v25IsProtected(context,start,bad.length)) return;
+    if(text.slice(start,start+bad.length)!==bad) return;
+    const f=v25Finding(context,{
+      start,length:bad.length,replacement:good,ruleId:id,confidence:.9997,
+      explanation,evidence,safe:true,type:'إملائي',classification:'orthographic',
+      metadata:{v25:true,v253:true,reviewed:true,recallGap:true}
+    });
+    const k=`${f.index}|${f.length}|${f.replacement}`;
+    if(!seen.has(k)){ seen.add(k); out.push(f); }
+  };
+
+  for(const [bad,good] of Object.entries(V253_REVIEWED_ORTHOGRAPHY)){
+    const re=new RegExp(`(^|[^\\u0621-\\u064A])${bad}(?=$|[^\\u0621-\\u064A])`,'gu');
+    let m;
+    while((m=re.exec(text))) add(m.index+m[1].length,bad,good,'V253_REVIEWED_ORTHOGRAPHY',
+      `فجوة إملائية مراجعة في V25.3: «${bad}» ← «${good}».`,
+      ['v253-recall-gap','reviewed-lexicon','single-valid-target']);
+  }
+
+  /* Only reviewed lexical families get the final-alif repair. This avoids
+   * touching verb dual forms that can legitimately end in ءا. */
+  for(const [bad,good] of Object.entries(V253_TANWIN_ALIF_MAP)){
+    const re=new RegExp(`(^|[^\\u0621-\\u064A])${bad}(?=$|[^\\u0621-\\u064A])`,'gu');
+    let m;
+    while((m=re.exec(text))) add(m.index+m[1].length,bad,good,'V253_TANWIN_FATHA_ALIF',
+      `ألف زائدة في رسم تنوين النصب؛ الصواب «${good}».`,
+      ['v253-recall-gap','fathatan-orthography','reviewed-lexical-form','single-valid-target']);
+  }
+}
+
+function v253AddObjectSoundPluralCase(context, out, seen){
+  const text=String(context.original||'');
+  for(const verb of V253_OBJECT_SMP_VERBS){
+    const re=new RegExp(`(^|[^\u0621-\u064A])(${verb})[ \t]+(ال[\u0621-\u064A]+ون)(?=$|[،؛.!؟ \t])`,'gu');
+    let m;
+    while((m=re.exec(text))){
+      const raw=m[3], start=m.index+m[1].length+m[2].length+1;
+      const stem=raw.slice(0,-2), good=stem+'ين';
+      if(!/^ال[\u0621-\u064A]+ين$/u.test(good)) continue;
+      if(v25IsProtected(context,start,raw.length)) continue;
+      const f=v25Finding(context,{
+        start,length:raw.length,replacement:good,ruleId:'V253_OBJECT_SMP_CASE_RECALL',
+        type:'نحوي',classification:'case',confidence:.9988,safe:false,
+        explanation:'الفعل الماضي المتكلم المتعدي حسم الاسم اللاحق مفعولًا به؛ جمع المذكر السالم في المفعول به يُنصب بالياء.',
+        evidence:['v253-recall-gap','first-person-past-transitive-frame','object-role','sound-masculine-plural','accusative-case'],
+        metadata:{v25:true,v253:true,recallGap:true,roleResolved:true,frame:'1sg-past-transitive'}
+      });
+      const k=`${f.index}|${f.length}|${f.replacement}`;
+      if(!seen.has(k)){ seen.add(k); out.push(f); }
+    }
+  }
+}
+function v253AddVocativeIdafaCase(context, out, seen){
+  const text=String(context.original||'');
+  const re=/(^|[^\u0621-\u064A])يا\s+[\u0621-\u064A]+َ\s+([^\u0621-\u064A]*[\u0621-\u064A]+[ٌُ])(?=$|[^\u064A])/gu;
+  let m;
+  while((m=re.exec(text))){
+    const originalWord=m[2], badMark=originalWord.slice(-1);
+    if(badMark!=='ُ' && badMark!=='ٌ') continue;
+    const start=m.index+m[1].length+m[0].lastIndexOf(originalWord);
+    if(v25IsProtected(context,start,originalWord.length)) continue;
+    const replacement=originalWord.slice(0,-1)+'ِ';
+    const f=v25Finding(context,{
+      start,length:originalWord.length,replacement,ruleId:'V253_VOCATIVE_IDAFA_GENITIVE',
+      type:'نحوي',classification:'case',confidence:.999,
+      explanation:'المضاف إليه بعد المنادى المضاف مجرور، لذلك لا يصح رفعه في تركيب الإضافة.',
+      evidence:['v253-recall-gap','vocative','idafa','visible-case-mark','genitive-dependency'],
+      safe:false,metadata:{v25:true,v253:true,recallGap:true,roleResolved:true}
+    });
+    const k=`${f.index}|${f.length}|${f.replacement}`;
+    if(!seen.has(k)){ seen.add(k); out.push(f); }
+  }
+}
+const V253_GOLD_CORPUS = Object.freeze([
+  {id:'v253-orth-tanwin-001',text:'مساءا جميلًا.',expected:'مساءً'},
+  {id:'v253-orth-tanwin-002',text:'جزءا صغيرًا.',expected:'جزءًا'},
+  {id:'v253-orth-tanwin-003',text:'عبئا ثقيلا.',expected:'عبئًا'},
+  {id:'v253-orth-tanwin-004',text:'دفئا لطيفًا.',expected:'دفئًا'},
+  {id:'v253-orth-tanwin-005',text:'سماءا صافية.',expected:'سماءً'},
+  {id:'v253-orth-lex-001',text:'الكره مفيدة للأطفال.',expected:'الكرة'},
+  {id:'v253-orth-lex-002',text:'التنميه هدف وطني.',expected:'التنمية'},
+  {id:'v253-orth-lex-003',text:'الاداريه الناجحة مطلوبة.',expected:'الإدارية'},
+  {id:'v253-orth-lex-004',text:'المراه تشارك في المجتمع.',expected:'المرأة'},
+  {id:'v253-orth-lex-005',text:'الاكاديميه تتطلب بحثًا.',expected:'الأكاديمية'},
+  {id:'v253-case-object-001',text:'رأيت المعلمون.',expected:'المعلمين'},
+  {id:'v253-case-object-002',text:'شاهدت المهندسون.',expected:'المهندسين'},
+  {id:'v253-case-object-003',text:'زرت الباحثون.',expected:'الباحثين'},
+  {id:'v253-vocative-001',text:'يا طالبَ العلمُ اجتهد.',expected:'العلمِ'}
+]);
+
+const V253_BLOCK_CORPUS = Object.freeze([
+  'رأيت المعلمين.', 'شاهدت المهندسين.', 'زرت الباحثين.',
+  'يا طالبَ العلمِ اجتهد.', 'يا طالبَ علمٍ اجتهد.',
+  'المرأة ناجحة.', 'التنمية مهمة.', 'الكرة مستديرة.',
+  'مساءً جميلًا.', 'جزءًا صغيرًا.', 'عبئًا ثقيلًا.',
+  'دفئًا لطيفًا.', 'سماءً صافية.',
+  'رأيت المعلمونَ.', /* marked input handled by legacy; no new duplicate expected */
+]);
+
+function runRegressionSuiteV253(options={}){
+  const failures=[]; let passed=0;
+  for(const t of V253_GOLD_CORPUS){
+    const r=analyzeV25(t.text,{safeMode:true,...options});
+    const hit=(r.findings||[]).some(f=>String(f.replacement||'').includes(t.expected))
+      || String(r.corrected||'').includes(t.expected)
+      || (r.abstained||[]).some(f=>String(f.replacement||'').includes(t.expected));
+    if(hit) passed++;
+    else failures.push({id:t.id,kind:'missed-error',text:t.text,expected:t.expected,
+      got:(r.findings||[]).map(f=>`${f.original}>${f.replacement}`),
+      abstained:(r.abstained||[]).map(f=>`${f.original}>${f.replacement}`)});
+  }
+  for(const text of V253_BLOCK_CORPUS){
+    const r=analyzeV25(text,{safeMode:true,...options});
+    const unsafe=(r.autoCorrectable||[]).filter(f=>String(f.ruleId||'').startsWith('V253_'));
+    if(!unsafe.length) passed++;
+    else failures.push({kind:'false-positive-v253',text,findings:unsafe.map(f=>({original:f.original,replacement:f.replacement,ruleId:f.ruleId}))});
+  }
+  return {version:V25_VERSION,total:V253_GOLD_CORPUS.length+V253_BLOCK_CORPUS.length,
+    passed,failed:failures.length,failures,valid:failures.length===0};
+}
+
+function runV253RecallGapAudit(options={}){
+  const r=runRegressionSuiteV253(options);
+  return {
+    version:V25_VERSION, valid:r.valid, total:r.total, passed:r.passed, failed:r.failed,
+    recall:r.failed===0?1:(r.passed/(r.total||1)),
+    falsePositiveFree:r.failures.every(x=>!String(x.kind||'').includes('false-positive')),
+    failures:r.failures
+  };
+}
+
 function applyV25DecisionEngineV252(context, legacy, options={}){
   let candidates=v25LegacySanitize(context,[...(legacy.findings||[])]);
   candidates=v251ResolveAlaIlla(context,candidates); // V25.2 — حسم اتجاه «الا»
@@ -24474,6 +24660,10 @@ function applyV25DecisionEngineV252(context, legacy, options={}){
   v25AddApproximation(context,candidates,seen);
   v25AddJussive(context,candidates,seen);
   v25AddPunctuation(context,candidates,seen);
+  // V25.3 Recall Gap Hardening — additive-only supplements.
+  v253AddRecallOrthography(context,candidates,seen);
+  v253AddObjectSoundPluralCase(context,candidates,seen);
+  v253AddVocativeIdafaCase(context,candidates,seen);
   // Final structural vetoes run after *all* recall supplements, because a late
   // layer must never recreate a candidate that an earlier safety layer rejected.
   candidates=candidates.filter((f)=>{
@@ -24912,6 +25102,7 @@ function validateV25(options={}){
     diacritize: diacritizeV20}),
   // ── V25.0.0 PRO FINAL — Context-Aware Arabic Decision Engine ──
   V25_GOLD_CORPUS, V25_BLOCK_CORPUS, V25_AUTO_GOLD_CORPUS, V25_DECISION_TIERS, V25CandidateRegistry, V25ConflictResolver,
+  V253_GOLD_CORPUS, V253_BLOCK_CORPUS, runRegressionSuiteV253, runV253RecallGapAudit,
   analyze: analyzeV25, check: analyzeV25, correct: correctV25, suggest: suggestV25,
   correctSafe: correctSafeV25, parse: parseV25, diacritize: diacritizeV25,
   inspectPOS: inspectPOSV25, inspectSyntax: inspectSyntaxV25, inspectDependencies: inspectDependenciesV25,
@@ -24929,7 +25120,12 @@ function validateV25(options={}){
     inspectPOS:inspectPOSV25, inspectSyntax:inspectSyntaxV25, inspectDependencies:inspectDependenciesV25, inspectRoles:inspectRolesV25,
     inspectConflicts:inspectConflictsV25, inspectDecision:inspectDecisionV25, inspectConfidence:inspectConfidenceV25, inspectProtectedSpans:inspectProtectedSpansV25,
     parse:parseV25, diacritize:diacritizeV25, validate:validateV25, validateData:validateV25Data, lexiconStats:lexiconStatsV25, pipelineDescription:pipelineDescriptionV25,
-    runFullSuiteV25, runBenchmarkV25}),
+    runFullSuiteV25, runBenchmarkV25,
+    recallGapV253:runV253RecallGapAudit, regressionV253:runRegressionSuiteV253,
+    V253_GOLD_CORPUS, V253_BLOCK_CORPUS}),
+  V25_3_PRO: Object.freeze({version:V25_VERSION, edition:META.edition, analyze:analyzeV25, correct:correctV25, suggest:suggestV25,
+    correctSafe:correctSafeV25, validate:validateV25, recallGapAudit:runV253RecallGapAudit,
+    regression:runRegressionSuiteV253, runFullSuiteV25, runBenchmarkV25}),
   // ── V21.0.0 PRO FINAL — المنادى والتعجب ──
   V21_PRO: Object.freeze({version: '21.0.0', edition: 'PRO-FINAL-V21.0',
     analyze: analyzePRO, validate: runFullSuiteV1920,
