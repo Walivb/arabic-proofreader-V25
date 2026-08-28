@@ -494,10 +494,10 @@
 const META = Object.freeze({
   name: 'Arabic Proofreader Hybrid Engine',
   nameArabic: 'محرك التدقيق العربي الهجين — النسخة الاحترافية الشاملة',
-  version: '25.3.0',
+  version: '25.2.0',
   edition: 'PRO-FINAL-V25.0.0-CONTEXT-DECISION-SAFE',
   language: 'ar',
-  release: 'V25.3.0 FINAL — Correction Validation Gate (signature-preserving grammar fixes only) + evidence-gated grammar rules (VSO feminine subject, demonstrative-pronoun agreement, number-tamyiz gender) + أمّ lexicon root fix',
+  release: 'V25.2.0 FINAL — Context-Aware Arabic Decision Engine / Precision-First Safety Hardening + V25.1 Independent Hardening (dead-rule root fixes, generalized jussive/VSO/orthography lexicon, negation-vs-prohibition arbitration)',
   stability: 'stable',
   releaseDate: '2026-08-27',
   governingPrinciple: 'عدم إفساد الجملة الصحيحة أهم من اكتشاف خطأ إضافي — توليدُ الاقتراح لا يعني قبولَه.',
@@ -1319,9 +1319,6 @@ const NOUN_LEMMAS = Object.freeze({
   'طالب': {gender: 'm', animacy: 'human', forms: [form('طالب', 'sg'), form('طالبان', 'du', 'nominative'), form('طالبين', 'du', 'accgen'), form('طلاب', 'pl', null, {pluralType: 'broken'})]},
   'طالبة': {gender: 'f', animacy: 'human', forms: [form('طالبة', 'sg'), form('طالبتان', 'du', 'nominative'), form('طالبتين', 'du', 'accgen'), form('طالبات', 'pl')]},
   'معلم': {gender: 'm', animacy: 'human', forms: [form('معلم', 'sg'), form('معلمان', 'du', 'nominative'), form('معلمين', 'du', 'accgen'), form('معلمون', 'pl', 'nominative'), form('معلمين', 'pl', 'accgen')]},
-  /* V25.3 — «أمّ» اسم مؤنث (الأم لا تكون حرف العطف «أم» لدخول أل).
-     المثنى «أمّان» حُذف عمدًا: يرسم «امان» فيلتبس بـ«أمان». */
-  'أم': {gender: 'f', animacy: 'human', forms: [form('أم', 'sg'), form('أمهات', 'pl', 'nominative'), form('أمهات', 'pl', 'accgen')]},
   'مدرس': {gender: 'm', animacy: 'human', forms: [form('مدرس', 'sg'), form('مدرسان', 'du', 'nominative'), form('مدرسين', 'du', 'accgen'), form('مدرسون', 'pl', 'nominative'), form('مدرسين', 'pl', 'accgen')]},
   'معلمة': {gender: 'f', animacy: 'human', forms: [form('معلمة', 'sg'), form('معلمتان', 'du', 'nominative'), form('معلمتين', 'du', 'accgen'), form('معلمات', 'pl')]},
   // V24 — ألقابٌ/أسماءُ مذكّرةٍ منتهيةٌ بتاءِ مربوطةٍ: لا تُعدُّ مؤنثةً رغم
@@ -23801,7 +23798,7 @@ function runV24AdditionBenchmarkV24(engine = {analyze}, options = {}) {
  * - overlapping candidate spans are conflict-resolved, not independently applied
  * - benchmark auto-correction precision is measured on exact end-to-end golds
  */
-const V25_VERSION = '25.3.0';
+const V25_VERSION = '25.2.0';
 const V25_DECISION_TIERS = Object.freeze({
   CERTAIN: 0.995,
   HIGH: 0.975,
@@ -24466,198 +24463,6 @@ const _V24_SUGGEST = suggest;
  * سلوك كل نقاط الدخول: الواجهة العامة، analyzePRO، حزم الانحدار، المعايير
  * الخارجية، وتطبيقات HTML/Blogger. كان انفصام المسارين سبب فشل
  * runFullSuiteV25 (recall=0.975 خارجيًا وprecision=0.88 في معيار V23). */
-
-/* ═══════════════ V25.3 — طبقة التحقق قبل اعتماد التصحيح النحوي ═══════════════
- * Correction Validation Gate — لا يمر أي تصحيح نحوي يغيّر «التوقيع الصرفي»
- * للكلمة (عدد/جنس/شخص/ضمير متصل) بلا دليل بنيوي صريح في نتيجة القاعدة،
- * ولا يُقبل استبدال بكلمة غير موثقة صرفيًا. الفخاخ الخمسة المستهدفة:
- *   الامتحان→الامتحين (استبدال غير موثق) · دقيقين→دقيقٌ (فقدان علامة عدد)
- *   وقال→قالت (تغيير جنس) · شاهدت→شاهد (فقدان لاحقة شخص)
- *   تساعده→يساعدون (إسقاط ضمير متصل + تغيير عدد)
- * الطبقة شبكة أمان نهائية بعد كل القواعد وقبل بوابة القرار الأخيرة. */
-const V253_EXEMPT_CLASSIFICATIONS = Object.freeze(new Set(['orthographic','spelling','hamza','punctuation','spacing','normalization','diacritics']));
-const V253_EVIDENCE_TOKENS = Object.freeze(['vso','subject-role','vso-frame','smp-nominative','role:subject','role:topic','kana','predicate-evidence','jussive-particle','five-verbs','five-verb-nun-deletion','nahya-particle','lam-amr','morphological-generation','transitive-verb','five-noun','idafa','gender-cue','number-cue','explicit-subject','feminine-subject-agreement','demonstrative-plural','pronoun-agreement','object-reading',
-  /* V25.3 — تواقيع المحللات الموثقة (لا علامات فضفاضة مثل «subject:» حتى
-     يبقى V2432-RoleGraph — الذي أثبت خطأه عمليًا — تحت رقابة الطبقة): */
-  'ApproximationVerbsResolver','subjunctive-implied-an','governor:','JussiveResolver',
-  'verb-subject-frame-resolver','postverbal-overt-subject','subject-resolver',
-  'contextual-subject-continuity','V243-contextual-adjective','adjective-resolver','noun-role-resolver','relative-pronoun-form','zanna-and-sisters',
-  'tawkid-maanawi','mafool-li-ajlih','mafool-fih','ism-fail-nasib','muakkad-case',
-  'inflection-conditioned-hamza-seat','orthographic-consensus']);
-const V253_PARSE_CACHE = new Map();
-function v253ParseSurface(surface){
-  const k=String(surface||'');
-  if(V253_PARSE_CACHE.has(k)) return V253_PARSE_CACHE.get(k);
-  let m=null;
-  try{ const p=parse(k); const t=p&&p.tokens&&p.tokens[0]; m=(t&&t.morph)||null; }catch(e){ m=null; }
-  V253_PARSE_CACHE.set(k,m);
-  return m;
-}
-function v253HasStructuralEvidence(f){
-  const ev=[...(f&&f.evidence||[])].map(String).join(' | ');
-  if(V253_EVIDENCE_TOKENS.some(tok=>ev.includes(tok))) return true;
-  const md=(f&&f.metadata)||{};
-  return md.roleResolved===true || md.subjectRoleResolved===true;
-}
-/* صنف العدد من السطح + التحليل. «ـين» مشتركة بين المثنى والجمع السالم
- * فهي صنف وسيط (dupl) متوافق مع du وpl معًا، لكنه لا يتوافق مع المفرد. */
-function v253NumberClass(surface, morph){
-  const s=stripDiacritics(String(surface||''));
-  const pos=morph&&morph.pos;
-  if(!['noun','adj','proper'].includes(pos)) return null;
-  if(s.length>3){
-    if(/ين$/u.test(s)) return 'dupl';
-    if(/ان$/u.test(s)) return 'du';
-    if(/(?:ون|ات)$/u.test(s)) return 'pl';
-  }
-  const n=morph&&(morph.number||(morph.nominal&&morph.nominal.number));
-  return (n==='du'||n==='pl')?n:null;
-}
-function v253NumberCompatible(a,b){
-  if(a===b) return true;
-  if(a===null||b===null) return a===b;            // فقد/اكتساب علامة عدد = تغيير
-  if(a==='dupl') return b==='du'||b==='pl';       // الـين مشتركة
-  if(b==='dupl') return a==='du'||a==='pl';
-  return false;
-}
-function v253ValidateCorrection(f){
-  try{
-    if(!f) return null;
-    const original=String(f.original||'');
-    const replacement=String(f.replacement||'');
-    if(!original || !replacement || original===replacement) return null;
-    // تغيير شكلي صرف (تشكيل/حالة إعرابية) لا يغيّر الهيكل الصرفي: خارج النطاق.
-    if(stripDiacritics(original)===stripDiacritics(replacement)) return null;
-    if(/\s/u.test(original)) return null;                       // متعدد الكلمات: خارج النطاق
-    const cls=String(f.classification||'');
-    if(V253_EXEMPT_CLASSIFICATIONS.has(cls)) return null;        // إملاء/ترقيم: قواعد معجمية
-    const evidence=v253HasStructuralEvidence(f);
-    if(evidence) return null;                                    // دليل بنيوي صريح ⇒ مرور
-    const om=v253ParseSurface(original);
-    const rm=v253ParseSurface(replacement);
-    // (أ) الاستبدال يجب أن يكون كلمة موثقة صرفيًا
-    const rmSrc=String(rm&&(rm.source||(rm.nominal&&rm.nominal.source)||(rm.verb&&rm.verb.source))||'');
-    if(!rm || rm.pos==='unknown' || rm.pos===undefined
-       || rmSrc==='unverified-productive-inflection-ending') return 'replacement-unverified';
-    // (ب) إسقاط الضمير المتصل
-    const oEncl=Boolean(om&&om.segments&&om.segments.enclitic);
-    const rEncl=Boolean(rm&&rm.segments&&rm.segments.enclitic);
-    if(oEncl && !rEncl) return 'enclitic-pronoun-dropped';
-    const oPos=om&&om.pos, rPos=rm&&rm.pos;
-    // (ج) تغير صنف العدد في الأسماء/الصفات
-    if(['noun','adj','proper'].includes(oPos) && ['noun','adj','proper'].includes(rPos)){
-      const nc1=v253NumberClass(original,om), nc2=v253NumberClass(replacement,rm);
-      if(!v253NumberCompatible(nc1,nc2)) return 'number-marker-changed';
-    }
-    // (د) تغير الجنس/الشخص/الصيغة في الأفعال
-    if((oPos==='verb'||(om&&om.lemma&&rPos==='verb')) && rPos==='verb'){
-      const os=stripDiacritics(original), rs=stripDiacritics(replacement);
-      if(/ت$/u.test(os)!==/ت$/u.test(rs)) return 'verb-gender-person-suffix-changed';
-      const oFive=/(?:ون|ين)$/u.test(os), rFive=/(?:ون|ين)$/u.test(rs);
-      const oJus=/(?:وا|ي)$/u.test(os), rJus=/(?:وا|ي)$/u.test(rs);
-      if(oFive!==rFive || oJus!==rJus) return 'verb-five-form-changed';
-      const oP=os[0], rP=rs[0];
-      if('تينا'.includes(oP) && 'تينا'.includes(rP) && oP!==rP) return 'verb-person-prefix-changed';
-    }
-    return null;
-  }catch(e){ return null; }
-}
-/* واجهة فحص مباشرة (تُصدَّر): تحقق من نتائج المحرك أو من نتائج مركّبة. */
-function inspectValidationV253(text, overrideFindings){
-  const list=Array.isArray(overrideFindings)?overrideFindings
-    :((analyze(String(text||''),{safeMode:true}).findings)||[]);
-  return {version:V25_VERSION, verdicts:list.map(f=>({
-    ruleId:f.ruleId||null, original:f.original||null, replacement:f.replacement||null,
-    classification:f.classification||null,
-    verdict:v253ValidateCorrection(f)||'pass'
-  }))};
-}
-
-/* ═══════════════ V25.3 — قواعد نحوية جديدة محكومة بالأدلة ═══════════════
- * كل قاعدة تحمل دليلها البنيوي الصريح فتمر عبر طبقة التحقق، بخلاف
- * التصحيحات العمياء التي ترفضها الطبقة. */
-const V253_INTRANSITIVE_VSO_VERBS = Object.freeze(new Set(['ذهب','خرج','وصل','سافر','جلس','قام','وقف','نام','مات','سقط','هرب']));
-const V253_PLURAL_DEMONSTRATIVES = Object.freeze(new Set(['هؤلاء','أولئك','هؤلاء']));
-const V253_NUM_M_FORMS = Object.freeze({ثلاث:'ثلاثة',أربع:'أربعة',خمس:'خمسة',ست:'ستة',سبع:'سبعة',ثمان:'ثمانية',تسع:'تسعة',عشر:'عشرة'});
-const V253_NUM_F_FORMS = Object.freeze({ثلاثة:'ثلاث',أربعة:'أربع',خمسة:'خمس',ستة:'ست',سبعة:'سبع',ثمانية:'ثمان',تسعة:'تسع',عشرة:'عشر'});
-function v253AddGrammar(context, out, seen){
-  const toks=context.tokens||[];
-  const push=(f,auto)=>{ if(!f) return;
-    if(auto){ f.safe=true; f.autoCorrectable=true; f.safeCandidate=true; }
-    const k=`${f.index}|${f.length}|${f.replacement}`; if(!seen.has(k)){seen.add(k);out.push(f);} };
-  for(let i=0;i<toks.length;i++){
-    const t=toks[i];
-    if(!t||t.type!=='word') continue;
-    const core=stripDiacritics(t.morph&&t.morph.core||t.clean||t.surface||'');
-    // ── 1) فاعل مؤنث صريح مجاور لفعل VSO لازم ⇒ تأنيث الفعل ──
-    if(V253_INTRANSITIVE_VSO_VERBS.has(core)){
-      let j=i+1; while(j<toks.length&&toks[j]&&toks[j].type!=='word') j++;
-      const subj=j<toks.length&&toks[j]&&toks[j].sentence===t.sentence?toks[j]:null;
-      const sm=subj&&subj.morph;
-      if(subj && sm && sm.pos==='noun' && sm.gender==='f'){
-        push(findingFromSpan(context,{startToken:t,replacement:core+'ت',ruleId:'V253_VSO_FEMININE_SUBJECT',
-          type:'نحوي',classification:'agreement',confidence:.99,
-          explanation:'الفعل لازم في صدر الجملة الفعلية، والاسم المجاور فاعل مؤنث حتمًا (لا يصلح مفعولًا)، فيجب تأنيث الفعل.',
-          evidence:['vso','explicit-subject','gender-cue','feminine-subject-agreement','subject-role','intransitive-verb'],
-          safe:true,metadata:{v25:true,v253:true,roleResolved:true}}),true);
-      }
-    }
-    // ── 2) اسم إشارة جمع + ضمير مفرد ⇒ ضمير جمع ──
-    if(V253_PLURAL_DEMONSTRATIVES.has(core)){
-      let j=i+1; while(j<toks.length&&toks[j]&&toks[j].type!=='word') j++;
-      const pr=j<toks.length&&toks[j]&&toks[j].sentence===t.sentence?toks[j]:null;
-      const pc=pr&&stripDiacritics(pr.morph&&pr.morph.core||pr.clean||pr.surface||'');
-      const repl=pc==='هو'?'هم':pc==='هي'?'هن':null;
-      if(repl){
-        push(findingFromSpan(context,{startToken:pr,replacement:repl,ruleId:'V253_DEMONSTRATIVE_PRONOUN_AGREEMENT',
-          type:'نحوي',classification:'agreement',confidence:.995,
-          explanation:'اسم الإشارة جمع (هؤلاء/أولئك) فالضمير العائد عليه جمع حتمًا؛ «هؤلاء هو» لا تصح بوجه.',
-          evidence:['demonstrative-plural','pronoun-agreement','explicit-subject'],
-          safe:true,metadata:{v25:true,v253:true,roleResolved:true}}),true);
-        /* تحكيم V25.3: القاعدة القديمة DEMONSTRATIVE_DEPENDENT_V18 تقترح
-           إفراد اسم الإشارة (أولئك→هذه) — قراءة منافسة، لكن الجمع المُعلَّم
-           مقصود عادةً والضمير هو الأرجح خطأً، وتطبيق التصحيحين معًا يفسد
-           الجملة. تُستبعد النتيجة القديمة المتقاطعة مع اسم الإشارة. */
-        const dStart=Number(t.start!=null?t.start:(t.index!=null?undefined:undefined));
-        const dIdx=Number(t.start!=null?t.start:0);
-        for(let k=out.length-1;k>=0;k--){
-          const g=out[k];
-          if(String(g.ruleId||'')==='DEMONSTRATIVE_DEPENDENT_V18'
-             && Number(g.index)<=dIdx && dIdx < Number(g.index)+Number(g.length||1)+40
-             && Math.abs(Number(g.index)-dIdx)<3){
-            g.vetoed=true; g.decisionClass='ABSTAINED'; g.autoCorrectable=false; g.safeCandidate=false;
-            g.requiresReview=true; g.recommendedAction='abstain';
-            g.v25VetoReason='تحكيم V25.3: إصلاح الضمير (هو→هم) أولى من إفراد اسم الإشارة؛ الجمع المُعلَّم مقصود والتطبيق المزدوج يفسد الجملة.';
-            out.splice(k,1);
-          }
-        }
-      }
-    }
-    // ── 3) عدد (3–10) يخالف تمييزه البشري جمعًا — مراجعة فقط ──
-    if(Object.prototype.hasOwnProperty.call(V253_NUM_M_FORMS,core) || Object.prototype.hasOwnProperty.call(V253_NUM_F_FORMS,core)){
-      let j=i+1; while(j<toks.length&&toks[j]&&toks[j].type!=='word') j++;
-      const tam=j<toks.length&&toks[j]&&toks[j].sentence===t.sentence?toks[j]:null;
-      const tm=tam&&tam.morph;
-      const nominal=tm&&(tm.nominal||tm);
-      if(tam && tm && tm.pos==='noun' && nominal && nominal.gender
-         && (nominal.number==='pl'||/ات$/u.test(stripDiacritics(tam.surface||'')))
-         && nominal.animacy==='human'
-         && String(nominal.source||'').indexOf('reviewed')===0){
-        const isMForm=Object.prototype.hasOwnProperty.call(V253_NUM_M_FORMS,core);
-        const mismatch=(isMForm && nominal.gender==='m') || (!isMForm && nominal.gender==='f');
-        if(mismatch){
-          const repl=isMForm?V253_NUM_M_FORMS[core]:V253_NUM_F_FORMS[core];
-          push(findingFromSpan(context,{startToken:t,replacement:repl,ruleId:'V253_NUMBER_TAMYIZ_GENDER',
-            type:'نحوي',classification:'agreement',confidence:.93,
-            explanation:'الأعداد 3–10 تخالف المعدود: المعدود المذكر مع العدد المؤنث والعكس. تُعرض مراجعةً لأن التمييز قد يُقدر.',
-            evidence:['number-cue','gender-cue','tamyiz-agreement'],
-            safe:false,metadata:{v25:true,v253:true,reviewOnly:true}}));
-        }
-      }
-    }
-  }
-}
-
 function applyV25DecisionEngineV252(context, legacy, options={}){
   let candidates=v25LegacySanitize(context,[...(legacy.findings||[])]);
   candidates=v251ResolveAlaIlla(context,candidates); // V25.2 — حسم اتجاه «الا»
@@ -24668,7 +24473,6 @@ function applyV25DecisionEngineV252(context, legacy, options={}){
   v25AddResolvedDependentAgreement(context,candidates,seen);
   v25AddApproximation(context,candidates,seen);
   v25AddJussive(context,candidates,seen);
-  v253AddGrammar(context,candidates,seen); // V25.3 — قواعد نحوية محكومة بالأدلة
   v25AddPunctuation(context,candidates,seen);
   // Final structural vetoes run after *all* recall supplements, because a late
   // layer must never recreate a candidate that an earlier safety layer rejected.
@@ -24713,13 +24517,6 @@ function applyV25DecisionEngineV252(context, legacy, options={}){
       if(prev==='لي' || prev==='لِ') reasons.push('standalone-li-is-preposition-pronoun');
     }
     if(v25ObjectAntecedentAgreementAmbiguity(context,f)) reasons.push('plural-object-antecedent-reading-is-valid');
-    const v253Verdict=v253ValidateCorrection(f); // V25.3 — طبقة التحقق قبل الاعتماد
-    if(v253Verdict){
-      if(typeof process!=='undefined' && process.env && process.env.V253_DEBUG){
-        try{ process.stderr.write('V253-VETO '+v253Verdict+' | '+String(f.ruleId)+' | '+String(f.original)+'>'+String(f.replacement)+' | ev='+JSON.stringify(f.evidence||[])+'\n'); }catch(e){}
-      }
-      reasons.push('v253-validation:'+v253Verdict);
-    }
     if(reasons.length){ f.decisionClass='ABSTAINED'; f.requiresReview=true; f.autoCorrectable=false; f.safeCandidate=false; f.recommendedAction='abstain'; f.v25VetoReason='بوابة السلامة النهائية: '+reasons.join(', '); allAbstained.push({...f,decisionReason:f.v25VetoReason}); }
     else finalKept.push(f);
   }
@@ -25120,7 +24917,6 @@ function validateV25(options={}){
   inspectPOS: inspectPOSV25, inspectSyntax: inspectSyntaxV25, inspectDependencies: inspectDependenciesV25,
   inspectRoles: inspectRolesV25, inspectConflicts: inspectConflictsV25, inspectDecision: inspectDecisionV25,
   inspectConfidence: inspectConfidenceV25, inspectProtectedSpans: inspectProtectedSpansV25,
-  inspectValidationV253: inspectValidationV253,
   inspectGovernment, inspectObjects, inspectConditionalGovernment, inspectHamzaMorphology, analyzeMorphology,
   validate: validateV25, validateData: validateV25Data, lexiconStats: lexiconStatsV25, pipelineDescription: pipelineDescriptionV25,
   runRegressionSuiteV25, runBenchmarkV25, runFullSuiteV25, V25DecisionEngine: Object.freeze({
