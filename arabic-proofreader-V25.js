@@ -1,8 +1,13 @@
 /*!
  * ============================================================================
- *  Arabic Proofreader V25.3.0 PRO FINAL — Blogger/GitHub Standalone Bundle
+ *  Arabic Proofreader V25.4.0 PRO FINAL — Blogger/GitHub Standalone Bundle
  *  ────────────────────────────────────────────────────────────────────────
- *  V25.3.0 PRO FINAL (2026-08-28) — Recall Gap Hardening + Context-Aware Decision + Safety
+ *  V25.4.0 PRO FINAL (2026-08-28) — Safe Blind Orthography + Deep Recall Expansion
+ *  ────────────────────────────────────────────────────────────────────────
+ *  V25.4.0: قاموس تصحيح إملائي آلي مغلق أحادي الهدف (وصل/قطع/همزات/تاء
+ *  مربوطة/ألف لينة/وصل وفصل)، مع استدعاء دور-نحوي يدوي للاستثناء والحال
+ *  والتمييز والنواسخ والأفعال المعتلة وإطار المفاعيل الثلاثة. لا تعميمات
+ *  عمياء في النحو، ولا تحويل عام «ه→ة» أو «ا→أ».
  *  ────────────────────────────────────────────────────────────────────────
  *  ما أُضيف في V23 فوق المنظومة الكاملة لـ V22 (الحفظُ التام لكل V22):
  *    ▸ SemanticSyntacticVeto 1.0 — طبقة القرار النحوي الصارمة:
@@ -455,10 +460,14 @@
     root.ArabicProofreaderV25PRO = api;
     root.ArabicProofreaderV25_3 = api;
     root.ArabicProofreaderV25_3PRO = api;
+    root.ArabicProofreaderV25_4 = api;
+    root.ArabicProofreaderV25_4PRO = api;
     root.V25 = api;
     root.V25_3 = api;
+    root.V25_4 = api;
     root.__ARABIC_PROOFREADER_V25_READY__ = true;
     root.__ARABIC_PROOFREADER_V25_3_READY__ = true;
+    root.__ARABIC_PROOFREADER_V25_4_READY__ = true;
     // علامة جاهزية صريحة يمكن للقالب فحصها قبل بدء التدقيق
     root.__ARABIC_PROOFREADER_V18_READY__ = true;
     root.__ARABIC_PROOFREADER_V19_READY__ = true;
@@ -498,12 +507,12 @@
 const META = Object.freeze({
   name: 'Arabic Proofreader Hybrid Engine',
   nameArabic: 'محرك التدقيق العربي الهجين — النسخة الاحترافية الشاملة',
-  version: '25.3.0',
-  edition: 'PRO-FINAL-V25.3.0-RECALL-GAP-HARDENED',
+  version: '25.4.0',
+  edition: 'PRO-FINAL-V25.4.0-SAFE-RECALL-EXPANSION',
   language: 'ar',
-  release: 'V25.3.0 PRO FINAL — Recall Gap Hardening / additive-only, root-cause recall recovery, strict regression preservation',
+  release: 'V25.4.0 PRO FINAL — Safe Blind Orthography + Deep Recall Expansion / additive-only, reviewed lexical autocorrection, role-aware grammar review',
   stability: 'stable',
-  releaseDate: '2026-08-27',
+  releaseDate: '2026-08-28',
   governingPrinciple: 'عدم إفساد الجملة الصحيحة أهم من اكتشاف خطأ إضافي — توليدُ الاقتراح لا يعني قبولَه.',
   compat: Object.freeze({
     baseVersion: '20.0.0',
@@ -643,7 +652,9 @@ const META = Object.freeze({
     'v24.5-production-completeness-1.0',
     'v24.5-role-graph-safety-1.0',
     'v24.5-decision-ambiguity-margin-1.0',
-    'v25.3-recall-gap-layer-1.0'
+    'v25.3-recall-gap-layer-1.0',
+    'v25.4-safe-blind-orthography-1.0', 'v25.4-role-recall-resolvers-1.0',
+    'v25.4-weak-verb-mood-resolver-1.0', 'v25.4-regression-suite-1.0'
   ]),
   resolverVersions: Object.freeze({
     ClauseIsolationResolver: '1.2',
@@ -717,7 +728,10 @@ const META = Object.freeze({
     V2443RecallSafety: '1.0', V2443AgreementRepair: '1.0', V2443WrongCorrectionVeto: '1.0',
     LaNafyaLilJinsResolver: '1.0', PassiveNaibFaelResolver: '1.0',
     DitransitiveVerbResolver: '1.0', MafoolMaahResolver: '1.0',
-    RelativeClauseCompletenessResolver: '1.0', JussiveCompletenessResolver: '1.0'
+    RelativeClauseCompletenessResolver: '1.0', JussiveCompletenessResolver: '1.0',
+    SafeBlindOrthographyResolver: '1.0', ExceptionResolver: '1.0', HalResolver: '2.0',
+    TamyizResolver: '2.0', NawasikhRecallResolver: '1.0', WeakVerbResolver: '2.0',
+    TriTransitiveFrameResolver: '1.0'
   }),
   releaseCriteria: Object.freeze({
     precision: 0.99,
@@ -820,7 +834,9 @@ const DEFAULT_OPTIONS = Object.freeze({
     // V24 — تنوين أفعل التفضيل النكرة
     comparativeTanwin: true,
     v245ProductionCompleteness: true,
-    v245Safety: true
+    v245Safety: true,
+    // V25.4 — blind lexical autocorrection + role-aware recall; grammar remains manual.
+    v254RecallExpansion: true
   }),
   // V24.1.0 — طبقة الإخراج الاحترافية
   includeDiacritics: false,
@@ -23803,7 +23819,7 @@ function runV24AdditionBenchmarkV24(engine = {analyze}, options = {}) {
  * - overlapping candidate spans are conflict-resolved, not independently applied
  * - benchmark auto-correction precision is measured on exact end-to-end golds
  */
-const V25_VERSION = '25.3.0';
+const V25_VERSION = '25.4.0';
 const V25_DECISION_TIERS = Object.freeze({
   CERTAIN: 0.995,
   HIGH: 0.975,
@@ -24649,6 +24665,392 @@ function runV253RecallGapAudit(options={}){
   };
 }
 
+
+
+/* ============================================================================
+ * V25.4.0 PRO — Safe Blind Orthography + Deep Recall Expansion 1.0
+ * --------------------------------------------------------------------------
+ * «التصحيح الأعمى» في هذا الإصدار محصور في الرسم المعجمي الذي له بديل قياسي
+ * واحد فقط. لا توجد قاعدة تحويل عامة من هاء إلى تاء، ولا قلب همزة، ولا تغيير
+ * نحوي آلي من دون إطار دور/حكومة مكتمل. لذلك تُصحح V254_BLIND_SAFE_* آليًا
+ * فقط، أما الاستثناء والحال والتمييز والنواسخ والأفعال المعتلة وأفعال المفاعيل
+ * فتعرض بوصفها مراجعة يدوية مفسّرة.
+ * ========================================================================== */
+
+const V254_BLIND_SAFE_ORTHOGRAPHY = Object.freeze({
+  /* همزة الوصل في الأسماء والأفعال الخماسية/السداسية: مدخلات مراجعة أحادية الهدف. */
+  'إبن':'ابن', 'إبنة':'ابنة', 'إسم':'اسم', 'إمرؤ':'امرؤ', 'إمرأة':'امرأة',
+  'إثنان':'اثنان', 'إثنتان':'اثنتان',
+  'إستخدم':'استخدم', 'إستعمل':'استعمل', 'إستخرج':'استخرج', 'إستفاد':'استفاد',
+  'إستقبل':'استقبل', 'إستمر':'استمر', 'إستقلال':'استقلال', 'إستثمار':'استثمار',
+  'إستثناء':'استثناء', 'إستفسار':'استفسار', 'إستراتيجية':'استراتيجية', 'إستثنائي':'استثنائي',
+  'إجتماع':'اجتماع', 'إجتماعي':'اجتماعي', 'إنتظار':'انتظار', 'إنتقال':'انتقال',
+  'إنتشار':'انتشار', 'إنتظام':'انتظام', 'إنتصار':'انتصار', 'إنتباه':'انتباه',
+  /* همزة القطع: لا تعميم على كل ألف أول الكلمة؛ كل مدخل له هدف مستقل. */
+  'ادارة':'إدارة', 'اداري':'إداري', 'ادارية':'إدارية', 'اعداد':'إعداد', 'اضافة':'إضافة',
+  'اجابة':'إجابة', 'اشارة':'إشارة', 'اصدار':'إصدار', 'اصلاح':'إصلاح', 'ارسال':'إرسال',
+  'اعلان':'إعلان', 'اجراء':'إجراء', 'انتاج':'إنتاج', 'انجاز':'إنجاز', 'انشاء':'إنشاء',
+  'امكان':'إمكان', 'انسان':'إنسان', 'ايمان':'إيمان', 'ايجابية':'إيجابية',
+  'اكاديمي':'أكاديمي', 'اكاديمية':'أكاديمية', 'املاء':'إملاء',
+  /* همزات متوسطة/متطرفة مراجعة؛ استبعدنا الوجوه التي تقبلها مدارس رسمية أخرى. */
+  'مسالة':'مسألة', 'مسأله':'مسألة', 'مسئله':'مسألة', 'مبدا':'مبدأ', 'مبداء':'مبدأ',
+  'منشا':'منشأ', 'منشاء':'منشأ', 'الشيئ':'الشيء', 'شيئ':'شيء',
+  /* تاء مربوطة: قاموس مغلق، لا قاعدة ة/ه إنتاجية. */
+  /* لا نصحح الصيغة المجردة هنا: «كتابه/طريقه» قد تكون اسمًا مضافًا إلى
+     ضمير (كتابُه/طريقُه). تقتصر المعالجة العمياء على الصيغة المعرفة ذات الهدف الواحد. */
+  'اللغه':'اللغة', 'الكلمه':'الكلمة',
+  'البيئه':'البيئة', 'الهيئه':'الهيئة',
+  'القضيه':'القضية', 'الطريقه':'الطريقة',
+  'الوظيفه':'الوظيفة', 'الخدمه':'الخدمة',
+  'الفرصه':'الفرصة', 'الطاقه':'الطاقة',
+  'الدوله':'الدولة', 'المدينه':'المدينة',
+  'الجامعه':'الجامعة', 'المدرسه':'المدرسة',
+  'القراءه':'القراءة', 'الكتابه':'الكتابة',
+  'المراه':'المرأة', 'المرأه':'المرأة',
+  'المساله':'المسألة', 'المنشأه':'المنشأة',
+  /* ألف لينة وأسماء الإشارة/الموصولات: لا نقترب من «على/علا/علي». */
+  'مستشفي':'مستشفى', 'مصطفي':'مصطفى', 'فتا':'فتى',
+  'هاذا':'هذا', 'هذة':'هذه', 'هولاء':'هؤلاء', 'هاؤلاء':'هؤلاء',
+  'الذى':'الذي', 'التى':'التي', 'اللذى':'الذي', 'اللتى':'التي',
+  'اولئك':'أولئك', 'الاول':'الأول', 'لاكن':'لكن'
+});
+
+/* Multiword entries are intentionally separate from the word lexicon: they
+ * carry phrase-level proof and never rewrite the ambiguous standalone «ان». */
+const V254_BLIND_SAFE_PHRASES = Object.freeze({
+  'ان شاء الله':'إن شاء الله',
+  'انشاء الله':'إن شاء الله',
+  'باذن الله':'بإذن الله'
+});
+
+const V254_EXCEPTION_INTRANSITIVE = Object.freeze(new Set(['جاء','حضر','وصل','عاد','نجح','سافر','خرج']));
+const V254_HAL_SIMPLE_VERBS = Object.freeze(new Set(['عاد','جاء','حضر','دخل','خرج','جلس','وقف','نام','استيقظ','تبسم']));
+const V254_HAL_LEMMAS = Object.freeze(new Set([
+  'مسرور','ضاحك','صغير','كبير','واقف','جالس','راكب','مسرع','هادئ','فرح','حزين','مبتسم'
+]));
+const V254_UNITS = Object.freeze(new Set(['لتر','كيلوغرام','كيلو','هكتار','متر','غرام']));
+const V254_TRI_TRANSITIVE = Object.freeze(new Set(['أعلمت','أنبأت','أخبرت','نبأت']));
+const V254_DITRANSITIVE = Object.freeze(new Set(['جعلت','صيّرت','اتخذت','رددت']));
+const V254_CONTINUATIVE_NAWASIKH = Object.freeze(new Set(['زال','برح','انفك','فتئ']));
+
+function v254TokenSurface(token){ return String(token?.surface || token?.clean || ''); }
+function v254TokenCore(token){ return stripDiacritics(v254TokenSurface(token)); }
+function v254IsWord(token){ return Boolean(token) && token.type === 'word'; }
+function v254IsNominal(token){ return ['noun','proper','adj'].includes(String(token?.morph?.pos || token?.pos || '')); }
+function v254IsSingularNominal(token){
+  return v254IsNominal(token) && String(token?.morph?.number || '') === 'sg';
+}
+function v254Esc(value){ return String(value).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'); }
+function v254CaseSurface(token, targetCase){
+  const surface=v254TokenSurface(token);
+  const observed=visibleCase(surface);
+  if(!observed) return null;
+  const definite=Boolean(token?.morph?.definite || token?.morph?.segments?.article || token?.morph?.segments?.enclitic);
+  /* Bare final vowel on a non-definite noun can be diptote/construct/quotation.
+     We deliberately do not manufacture a tanwin target in that ambiguity. */
+  const useTanwin=observed.kind==='tanwin' && !definite;
+  if(!definite && !useTanwin) return null;
+  let base=surface.replace(/(?:\u064Bا|[\u064B-\u0650])$/u,'');
+  const simple={nominative:useTanwin?'ٌ':'ُ',accusative:useTanwin?'ً':'َ',genitive:useTanwin?'ٍ':'ِ'};
+  const mark=simple[targetCase]; if(!mark) return null;
+  if(targetCase==='accusative' && useTanwin){
+    /* ألف دعم تنوين النصب لا تلحق بالتاء المربوطة ولا بالألف المقصورة ولا
+       بالهمزة التي قبلها ألف؛ الهمزة المفردة تحتاج معالجة مقعد مستقلة. */
+    if(/[ةى]$/u.test(base) || /ا?ء$/u.test(base) && /اء$/u.test(base)) return base+mark;
+    if(/ء$/u.test(base)) return null;
+    return base+mark+'ا';
+  }
+  return base+mark;
+}
+function v254SingleVowelCase(surface, mark){
+  return String(surface||'').replace(/[\u064B-\u0650]$/u,'')+mark;
+}
+function v254AddCandidate(context, out, seen, token, replacement, ruleId, explanation, evidence, metadata={}){
+  if(!token || !replacement || replacement===v254TokenSurface(token)) return;
+  const start=Number(token.start), length=Number(token.end)-Number(token.start);
+  if(!Number.isFinite(start) || length<0 || v25IsProtected(context,start,length)) return;
+  const f=findingFromSpan(context,{startToken:token,replacement,ruleId,type:'نحوي',classification:metadata.classification||'syntax',
+    confidence:metadata.confidence||.9975,explanation,evidence,safe:false,
+    metadata:{v25:true,v254:true,reviewed:true,roleResolved:true,resolver:metadata.resolver||'V254RoleRecall',...metadata}});
+  /* Grammar is always surfaced as manual review even when the local frame is strong. */
+  f.manualOnly=true;
+  const key=`${f.index}|${f.length}|${f.replacement}`;
+  if(!seen.has(key)){ seen.add(key); out.push(f); }
+}
+function v254AddPhraseCandidate(context,out,seen,start,length,replacement,ruleId,explanation,evidence,metadata={}){
+  if(!replacement || v25IsProtected(context,start,length)) return;
+  const f=v25Finding(context,{start,length,replacement,ruleId,type:'نحوي',classification:metadata.classification||'syntax',
+    confidence:metadata.confidence||.9975,explanation,evidence,safe:false,
+    metadata:{v25:true,v254:true,reviewed:true,roleResolved:true,resolver:metadata.resolver||'V254RoleRecall',...metadata}});
+  f.manualOnly=true;
+  const key=`${f.index}|${f.length}|${f.replacement}`;
+  if(!seen.has(key)){seen.add(key);out.push(f);}
+}
+
+function v254AddBlindOrthography(context,out,seen){
+  const text=String(context.original||'');
+  const add=(start,bad,good,ruleId,family)=>{
+    if(!bad || !good || bad===good || v25IsProtected(context,start,bad.length)) return;
+    if(text.slice(start,start+bad.length)!==bad) return;
+    const f=v25Finding(context,{start,length:bad.length,replacement:good,ruleId,confidence:.9999,
+      explanation:`تصحيح إملائي آلي مراجع أحادي الهدف: «${bad}» ← «${good}».`,
+      evidence:['v254-safe-blind-lexicon','single-valid-target',family],safe:true,type:'إملائي',classification:'orthographic',
+      metadata:{v25:true,v254:true,reviewed:true,blindSafe:true,orthographyMaster:true,family}});
+    const key=`${f.index}|${f.length}|${f.replacement}`;
+    if(!seen.has(key)){seen.add(key);out.push(f);}
+  };
+  const boundary='[^\\u0621-\\u064A\\u064B-\\u065F]';
+  const insideReviewedPhrase=(start,length)=>Object.keys(V254_BLIND_SAFE_PHRASES).some(phrase=>{
+    let at=text.indexOf(phrase);
+    while(at>=0){
+      if(at<=start && at+phrase.length>=start+length) return true;
+      at=text.indexOf(phrase,at+1);
+    }
+    return false;
+  });
+  /* A phrase-level correction is semantically stronger than an overlapping
+     word entry: «انشاء الله» must remain «إن شاء الله», not «إنشاء الله». */
+  for(const [bad,good] of Object.entries(V254_BLIND_SAFE_PHRASES)){
+    const re=new RegExp(`(^|${boundary})${v254Esc(bad)}(?=$|${boundary})`,'gu'); let m;
+    while((m=re.exec(text))){ const start=m.index+(m[1]?m[1].length:0); add(start,bad,good,'V254_BLIND_JOINING_PHRASE','joining-and-separation'); }
+  }
+  for(const [bad,good] of Object.entries(V254_BLIND_SAFE_ORTHOGRAPHY)){
+    const re=new RegExp(`(^|${boundary})${v254Esc(bad)}(?=$|${boundary})`,'gu'); let m;
+    while((m=re.exec(text))){
+      const start=m.index+(m[1]?m[1].length:0);
+      if(!insideReviewedPhrase(start,bad.length)) add(start,bad,good,'V254_BLIND_ORTHOGRAPHY_MASTER','reviewed-orthography');
+    }
+  }
+}
+
+/* الاستثناء: لا نتصرف في التام المنفي الذي يجيز وجهين. نغطي فقط المفرغ
+ * الذي يحسم فيه الفعل اللازم الوظيفة، وحالة «مررت» التي يلزمها حرف الجر. */
+function v254AddExceptionRecall(context,out,seen){
+  const toks=context.tokens||[];
+  for(let i=0;i<toks.length-3;i++){
+    const a=v254TokenCore(toks[i]), b=v254TokenCore(toks[i+1]), c=v254TokenCore(toks[i+2]), d=toks[i+3];
+    if(a==='ما' && V254_EXCEPTION_INTRANSITIVE.has(b) && c==='إلا' && v254IsNominal(d) && !d.morph?.definite){
+      const replacement=v254CaseSurface(d,'nominative');
+      if(replacement) v254AddCandidate(context,out,seen,d,replacement,'V254_EXCEPTION_MUFRAGH_SUBJECT',
+        'التركيب منفي مفرغ وفعلُه لازم؛ الاسم بعد «إلا» هو الفاعل، فيرفع.',
+        ['exception-mufarragh','negative-ma','intransitive-verb','subject-role','visible-case'],
+        {resolver:'ExceptionResolver-1.0',classification:'exception'});
+    }
+    if(a==='ما' && b==='مررت' && c==='إلا' && v254IsNominal(d) && !d.morph?.segments?.preposition){
+      const genitive=v254CaseSurface(d,'genitive');
+      if(genitive) v254AddCandidate(context,out,seen,d,'ب'+genitive,'V254_EXCEPTION_MUFRAGH_PREPOSITION',
+        'الفعل «مررت» يتعدى بالباء؛ في الاستثناء المفرغ يلزم الجار والمجرور «إلا بطالبٍ».',
+        ['exception-mufarragh','negative-ma','marartu-preposition-frame','structural-repair','visible-case'],
+        {resolver:'ExceptionResolver-1.0',classification:'exception',structuralChange:true});
+    }
+  }
+  for(let i=0;i<toks.length-3;i++){
+    const head=toks[i+1], tool=toks[i+2], dep=toks[i+3];
+    if(!v254IsNominal(head) || String(head?.morph?.number||'')!=='pl') continue;
+    const toolCore=v254TokenCore(tool);
+    if(!['غير','سوى'].includes(toolCore) || !visibleCase(v254TokenSurface(tool)) || !visibleCase(v254TokenSurface(dep))) continue;
+    if(visibleCase(v254TokenSurface(tool)).case!=='nominative' || visibleCase(v254TokenSurface(dep)).case!=='nominative') continue;
+    const toolFixed=v254SingleVowelCase(v254TokenSurface(tool),'َ');
+    const depFixed=v254CaseSurface(dep,'genitive');
+    if(!depFixed) continue;
+    const start=Number(tool.start), length=Number(dep.end)-start;
+    v254AddPhraseCandidate(context,out,seen,start,length,`${toolFixed} ${depFixed}`,'V254_EXCEPTION_GHAYR_SIWA_IDAFA',
+      `«${toolCore}» في الاستثناء التام المثبت مستثنى منصوب، وما بعده مضاف إليه مجرور.`,
+      ['complete-affirmative-exception','exception-tool','idafa','plural-antecedent','visible-case'],
+      {resolver:'ExceptionResolver-1.0',classification:'exception'});
+  }
+}
+
+/* الحال: صيغة وصف نكرة بعد فعل وفاعل مفرد ظاهر. لا يعمل على النعت المعرف
+ * ولا على شبه الجملة، ولا يقرر الحال المقدرة من دون قرينة ظاهرة. */
+function v254AddHalRecall(context,out,seen){
+  const toks=context.tokens||[];
+  for(let i=0;i<toks.length-2;i++){
+    const verb=v254TokenCore(toks[i]), subject=toks[i+1];
+    if(!V254_HAL_SIMPLE_VERBS.has(verb) || !v254IsSingularNominal(subject)) continue;
+    let target=toks[i+2];
+    if(!target) continue;
+    if(v254IsNominal(target) && target.morph?.definite && visibleCase(v254TokenSurface(target))?.case==='accusative') target=toks[i+3];
+    if(!target || target.morph?.definite || !visibleCase(v254TokenSurface(target))) continue;
+    const targetCore=v254TokenCore(target);
+    const isAdj=String(target?.morph?.pos||'')==='adj' || V254_HAL_LEMMAS.has(targetCore);
+    if(!isAdj || visibleCase(v254TokenSurface(target)).case!=='nominative') continue;
+    const sg=String(subject?.morph?.gender||''), tg=String(target?.morph?.gender||'');
+    if(sg && tg && sg!==tg) continue;
+    const replacement=v254CaseSurface(target,'accusative');
+    if(replacement) v254AddCandidate(context,out,seen,target,replacement,'V254_HAL_SINGLE_DESCRIPTION',
+      'الوصف النكرة بعد الفعل والفاعل الظاهر حالٌ مفرد، والأصل فيه النصب.',
+      ['hal-resolver','intransitive-or-motion-verb','explicit-singular-subject','indefinite-description','visible-case'],
+      {resolver:'HalResolver-2.0',classification:'hal'});
+  }
+}
+
+/* تمييز المقادير: إطار فعل متعدٍ بضمير متكلم + وحدة مقدار + مادة نكرة مظهرة.
+ * لا نعممه على كل اسمين متجاورين كي لا يختلط بالمفعول به أو الإضافة. */
+function v254AddTamyizRecall(context,out,seen){
+  const toks=context.tokens||[];
+  for(let i=0;i<toks.length-2;i++){
+    const verb=v254TokenSurface(toks[i]), unit=toks[i+1], tamyiz=toks[i+2];
+    const unitCore=v254TokenCore(unit);
+    if(!/تُ$/u.test(verb) || !V254_UNITS.has(unitCore) || !v254IsNominal(tamyiz)) continue;
+    if(visibleCase(v254TokenSurface(unit))?.case!=='nominative' || visibleCase(v254TokenSurface(tamyiz))?.case!=='nominative') continue;
+    const unitReplacement=v254CaseSurface(unit,'accusative'), tamyizReplacement=v254CaseSurface(tamyiz,'accusative');
+    if(unitReplacement) v254AddCandidate(context,out,seen,unit,unitReplacement,'V254_TAMYIZ_UNIT_OBJECT',
+      'وحدة المقدار بعد فعل متعدٍ مفعولٌ به منصوب في هذا الإطار الصريح.',
+      ['tamyiz-resolver','first-person-past','reviewed-unit','object-role','visible-case'],
+      {resolver:'TamyizResolver-2.0',classification:'tamyiz'});
+    if(tamyizReplacement) v254AddCandidate(context,out,seen,tamyiz,tamyizReplacement,'V254_TAMYIZ_MEASURED_NOUN',
+      'الاسم النكرة بعد وحدة المقدار تمييزٌ منصوب.',
+      ['tamyiz-resolver','reviewed-unit','measured-noun','visible-case'],
+      {resolver:'TamyizResolver-2.0',classification:'tamyiz'});
+  }
+}
+
+/* النواسخ المستمرة: خبر «ما زال/ما برح/ما انفك/ما فتئ» الفعلي مرفوع، فلا
+ * يحمل علامة نصب أو جزم. لا نطبق التصحيح آليًا رغم وضوح الإطار. */
+function v254AddNawasikhRecall(context,out,seen){
+  const toks=context.tokens||[];
+  for(let i=0;i<toks.length-3;i++){
+    const a=v254TokenCore(toks[i]), b=v254TokenCore(toks[i+1]);
+    const isMaContinuative=a==='ما' && V254_CONTINUATIVE_NAWASIKH.has(b);
+    const isLaYazalu=a==='لا' && b==='يزال';
+    if(!isMaContinuative && !isLaYazalu) continue;
+    const subject=toks[i+2], predicate=toks[i+3];
+    if(String(subject?.morph?.number||'')!=='pl' || String(subject?.morph?.gender||'')!=='m') continue;
+    const surface=v254TokenCore(predicate);
+    if(!/^ي[ء-ي]+وا$/u.test(surface)) continue;
+    const replacement=surface.slice(0,-2)+'ون';
+    v254AddCandidate(context,out,seen,predicate,replacement,'V254_NAWASIKH_CONTINUATIVE_INDICATIVE',
+      'خبر الناسخ المستمر جملة فعلية فعلها مضارع مرفوع؛ لا تنصب هذه النواسخ ولا تجزم الفعل.',
+      ['nawasikh-resolver','continuative-copula','explicit-masculine-plural-subject','indicative-mood'],
+      {resolver:'NawasikhResolver-3.0',classification:'verb-mood'});
+  }
+}
+
+/* الأفعال المعتلة: لا نلمس «لم يدعوا الطلاب»؛ لا يعمل الإصلاح إلا حين يثبت
+ * الفاعل المفرد التالي أن الواو/الياء/الألف ليست علامة جماعة. */
+function v254AddWeakVerbJussiveRecall(context,out,seen){
+  const toks=context.tokens||[];
+  const forms=Object.freeze({
+    'يدعو':'يدعُ', 'يسعى':'يسعَ', 'يرمي':'يرمِ', 'يمشي':'يمشِ', 'يسير':'يسرِ'
+  });
+  for(let i=0;i<toks.length-2;i++){
+    if(v254TokenCore(toks[i])!=='لم') continue;
+    const verb=toks[i+1], subject=toks[i+2], core=v254TokenCore(verb);
+    const replacement=forms[core];
+    if(!replacement || !v254IsSingularNominal(subject)) continue;
+    v254AddCandidate(context,out,seen,verb,replacement,'V254_WEAK_VERB_JUSSIVE_SINGULAR',
+      '«لم» تجزم المضارع المعتل الآخر بحذف حرف العلة؛ الفاعل المفرد التالي يمنع قراءة واو الجماعة.',
+      ['weak-verb-resolver','lam-jussive','explicit-singular-subject','defective-verb','morphological-generation'],
+      {resolver:'WeakVerbResolver-2.0',classification:'verb-mood',canonicalWeakJussive:true});
+  }
+}
+
+/* أفعال القلوب/التصيير ذات الإطار المحدود في النص المشكول: ندخل فقط عندما
+ * تظهر تاء المتكلم وثلاثة متممات مرفوعة ظاهريًا، فتكون أدوارها قابلة للحسم. */
+function v254AddObjectFrameRecall(context,out,seen){
+  const toks=context.tokens||[];
+  for(let i=0;i<toks.length-3;i++){
+    const verb=v254TokenSurface(toks[i]), core=v254TokenCore(toks[i]);
+    if(!/تُ$/u.test(verb) || !V254_TRI_TRANSITIVE.has(core)) continue;
+    const objects=[toks[i+1],toks[i+2],toks[i+3]];
+    if(!objects.every(v254IsNominal) || !objects.every(t=>visibleCase(v254TokenSurface(t))?.case==='nominative')) continue;
+    for(const [slot,token] of objects.entries()){
+      const replacement=v254CaseSurface(token,'accusative');
+      if(replacement) v254AddCandidate(context,out,seen,token,replacement,`V254_TRI_TRANSITIVE_OBJECT_${slot+1}`,
+        `الفعل «${core}» في هذا الإطار يتعدى إلى ثلاثة مفاعيل؛ المفعول ${['الأول','الثاني','الثالث'][slot]} منصوب.`,
+        ['tri-transitive-frame','first-person-past','three-explicit-complements',`object-${slot+1}`,'visible-case'],
+        {resolver:'TriTransitiveFrameResolver-1.0',classification:'case',frame:'three-objects',slot:slot+1});
+    }
+  }
+  for(let i=0;i<toks.length-2;i++){
+    const verb=v254TokenSurface(toks[i]), core=v254TokenCore(toks[i]);
+    if(!/تُ$/u.test(verb) || !V254_DITRANSITIVE.has(core)) continue;
+    const first=toks[i+1], second=toks[i+2];
+    if(!v254IsNominal(first) || !v254IsNominal(second)) continue;
+    if(visibleCase(v254TokenSurface(first))?.case!=='nominative' || visibleCase(v254TokenSurface(second))?.case!=='nominative') continue;
+    for(const [slot,token] of [[1,first],[2,second]]){
+      const replacement=v254CaseSurface(token,'accusative');
+      if(replacement) v254AddCandidate(context,out,seen,token,replacement,`V254_DITRANSITIVE_OBJECT_${slot}`,
+        `الفعل «${core}» من أفعال التصيير في هذا الإطار؛ المفعول ${slot===1?'الأول':'الثاني'} منصوب.`,
+        ['ditransitive-frame','first-person-past','two-explicit-complements',`object-${slot}`,'visible-case'],
+        {resolver:'VerbFrameResolver-2.0',classification:'case',frame:'two-objects',slot});
+    }
+  }
+}
+
+function v254AddRoleRecall(context,out,seen){
+  v254AddExceptionRecall(context,out,seen);
+  v254AddHalRecall(context,out,seen);
+  v254AddTamyizRecall(context,out,seen);
+  v254AddNawasikhRecall(context,out,seen);
+  v254AddWeakVerbJussiveRecall(context,out,seen);
+  v254AddObjectFrameRecall(context,out,seen);
+}
+
+const V254_GOLD_CORPUS = Object.freeze([
+  {id:'v254-orth-wasl-ibn',text:'إبن المدير في المدرسه.',expected:'ابن'},
+  {id:'v254-orth-wasl-ism',text:'إسم الطالبة صحيح.',expected:'اسم'},
+  {id:'v254-orth-wasl-istithna',text:'إستثناء مهم.',expected:'استثناء'},
+  {id:'v254-orth-qata-idara',text:'ادارة المدرسه ناجحة.',expected:'إدارة'},
+  {id:'v254-orth-qata-masala',text:'هذه مسالة مهمه.',expected:'مسألة'},
+  {id:'v254-orth-hamza-final',text:'هذا مبدا واضح.',expected:'مبدأ'},
+  {id:'v254-orth-ta',text:'البيئه نظيفه.',expected:'البيئة'},
+  {id:'v254-orth-maqsura',text:'زار مستشفي الجامعه.',expected:'مستشفى'},
+  {id:'v254-orth-demonstrative',text:'هاذا كتاب.',expected:'هذا'},
+  {id:'v254-orth-relative',text:'الذى نجح مكرم.',expected:'الذي'},
+  {id:'v254-orth-joining',text:'ان شاء الله ننجح.',expected:'إن شاء الله'},
+  {id:'v254-exception-mufarragh',text:'ما جاء إلا طالبًا.',expected:'طالبٌ'},
+  {id:'v254-exception-preposition',text:'ما مررت إلا طالبٌ.',expected:'بطالبٍ'},
+  {id:'v254-exception-ghayr',text:'حضر الطلاب غيرُ طالبٌ.',expected:'غيرَ طالبٍ'},
+  {id:'v254-hal-simple',text:'تبسم الطفل ضاحكٌ.',expected:'ضاحكًا'},
+  {id:'v254-hal-after-object',text:'دخل الطفل المدرسةَ صغيرٌ.',expected:'صغيرًا'},
+  {id:'v254-tamyiz-measure',text:'اشتريتُ لترٌ ماءٌ.',expected:'لترًا'},
+  {id:'v254-nawasikh-continuative',text:'ما زال الطلاب يكتبوا.',expected:'يكتبون'},
+  {id:'v254-weak-waw',text:'لم يدعو الطالب.',expected:'يدعُ'},
+  {id:'v254-weak-ya',text:'لم يرمي الطفل.',expected:'يرمِ'},
+  {id:'v254-tri-transitive',text:'أعلمتُ الطالبُ الخبرُ صحيحٌ.',expected:'الطالبَ'},
+  {id:'v254-ditransitive',text:'جعلتُ المسألةُ صعبةٌ.',expected:'المسألةَ'}
+]);
+const V254_BLOCK_CORPUS = Object.freeze([
+  'ابن المدير في المدرسة.', 'اسم الطالبة صحيح.', 'استثناء مهم.', 'إدارة المدرسة ناجحة.',
+  'هذه مسألة مهمة.', 'هذا مبدأ واضح.', 'البيئة نظيفة.', 'زار مستشفى الجامعة.',
+  'هذا كتاب.', 'الذي نجح مكرم.', 'إن شاء الله ننجح.',
+  'ما جاء إلا طالبٌ.', 'ما مررت إلا بطالبٍ.', 'حضر الطلاب غيرَ طالبٍ.',
+  'تبسم الطفل ضاحكًا.', 'دخل الطفل المدرسةَ صغيرًا.', 'اشتريتُ لترًا ماءً.',
+  'ما زال الطلاب يكتبون.', 'لم يدعُ الطالب.', 'لم يدعوا الطلاب.',
+  'أعلمتُ الطالبَ الخبرَ صحيحًا.', 'جعلتُ المسألةَ صعبةً.',
+  'ما جاء الطلاب إلا طالبٌ.', 'ما جاء الطلاب إلا طالبًا.',
+  'عاد الطالب في المساء.', 'الطلاب لم يدعوا إلى الاجتماع.'
+]);
+
+function runRegressionSuiteV254(options={}){
+  const failures=[]; let passed=0;
+  for(const test of V254_GOLD_CORPUS){
+    const r=analyzeV25(test.text,{safeMode:true,...options});
+    const candidates=[...(r.findings||[]),...(r.abstained||[])];
+    const hit=candidates.some(f=>String(f.replacement||'').includes(test.expected)) || String(r.corrected||'').includes(test.expected);
+    if(hit) passed++; else failures.push({id:test.id,kind:'missed-error',text:test.text,expected:test.expected,
+      got:candidates.map(f=>`${f.ruleId}:${f.original}>${f.replacement}`)});
+  }
+  for(const text of V254_BLOCK_CORPUS){
+    const r=analyzeV25(text,{safeMode:true,...options});
+    const own=[...(r.findings||[]),...(r.abstained||[])].filter(f=>String(f.ruleId||'').startsWith('V254_'));
+    if(!own.length) passed++; else failures.push({kind:'false-positive-v254',text,
+      findings:own.map(f=>({ruleId:f.ruleId,original:f.original,replacement:f.replacement,decisionClass:f.decisionClass}))});
+  }
+  return {version:V25_VERSION,total:V254_GOLD_CORPUS.length+V254_BLOCK_CORPUS.length,passed,failed:failures.length,failures,valid:failures.length===0};
+}
+function runV254RecallExpansionAudit(options={}){
+  const regression=runRegressionSuiteV254(options);
+  const autoCases=V254_GOLD_CORPUS.filter(x=>x.id.startsWith('v254-orth-'));
+  let autoPassed=0;
+  for(const test of autoCases){ if(correctV25(test.text,{safeMode:true,...options}).includes(test.expected)) autoPassed++; }
+  return {version:V25_VERSION,valid:regression.valid,regression,
+    automaticOrthography:{total:autoCases.length,passed:autoPassed,recall:autoCases.length?autoPassed/autoCases.length:1},
+    grammarPolicy:'review-only',falsePositiveFree:regression.failures.every(f=>!String(f.kind||'').startsWith('false-positive'))};
+}
+
 function applyV25DecisionEngineV252(context, legacy, options={}){
   let candidates=v25LegacySanitize(context,[...(legacy.findings||[])]);
   candidates=v251ResolveAlaIlla(context,candidates); // V25.2 — حسم اتجاه «الا»
@@ -24664,6 +25066,12 @@ function applyV25DecisionEngineV252(context, legacy, options={}){
   v253AddRecallOrthography(context,candidates,seen);
   v253AddObjectSoundPluralCase(context,candidates,seen);
   v253AddVocativeIdafaCase(context,candidates,seen);
+  // V25.4: lexical corrections may be automatic only when a reviewed map proves one target.
+  // Deep role resolvers deliberately emit manual-review candidates.
+  if(context.options.rules.v254RecallExpansion !== false){
+    v254AddBlindOrthography(context,candidates,seen);
+    v254AddRoleRecall(context,candidates,seen);
+  }
   // Final structural vetoes run after *all* recall supplements, because a late
   // layer must never recreate a candidate that an earlier safety layer rejected.
   candidates=candidates.filter((f)=>{
@@ -24745,7 +25153,7 @@ function pipelineDescriptionV25(){
   return {version:V25_VERSION,engine:'V25DecisionEngine',order:[
     'Normalization','Tokenization','ProtectedSpans','Morphology','POS','PhraseDetection','ClauseDetection','VerbFrame',
     'Subject','Object','Government','Agreement','Dependency','RoleEvidence','CandidateGeneration','CandidateRegistry',
-    'ConflictResolution','Confidence+DecisionMargin','Veto','CorrectionRanking','SafeCorrection'
+    'ConflictResolution','Confidence+DecisionMargin','Veto','SafeBlindOrthography','RoleRecall(Manual)','CorrectionRanking','SafeCorrection'
   ],legacyBase:'V18→V24.5 preserved'};
 }
 function validateV25Data(){
@@ -24834,7 +25242,7 @@ function runFullSuiteV25(options={}){
     ['V19.2.0',runRegressionSuiteV1920],['V20.0.0',runRegressionSuiteV20],
     ['V23.0.0',runRegressionSuiteV23],['V24.1.0',runRegressionSuiteV241],
     ['V24.2.x',runRegressionSuiteV242],['V24.3.0',runRegressionSuiteV243],
-    ['V24.3.1',runRegressionSuiteV2431],['V24.5.0',runRegressionSuiteV245]
+    ['V24.3.1',runRegressionSuiteV2431],['V24.5.0',runRegressionSuiteV245],['V25.4.0',runRegressionSuiteV254]
   ];
   const regressions={}; let regressionsValid=true;
   for(const [label,fn] of regressionNames){
@@ -24855,7 +25263,7 @@ function runFullSuiteV25(options={}){
   const publicApi=ArabicProofreaderV18;
   const compatibilityNames=[...(META.compat?.preservedApi||[])];
   const missingLegacyApi=compatibilityNames.filter(name=>!Object.prototype.hasOwnProperty.call(publicApi,name));
-  const v25ApiNames=['analyze','correct','suggest','correctSafe','inspectPOS','inspectSyntax','inspectDependencies','inspectRoles','inspectConflicts','inspectDecision','inspectConfidence','inspectProtectedSpans','parse','diacritize','validate','validateData','lexiconStats','pipelineDescription','runFullSuiteV25','runBenchmarkV25'];
+  const v25ApiNames=['analyze','correct','suggest','correctSafe','inspectPOS','inspectSyntax','inspectDependencies','inspectRoles','inspectConflicts','inspectDecision','inspectConfidence','inspectProtectedSpans','parse','diacritize','validate','validateData','lexiconStats','pipelineDescription','runFullSuiteV25','runBenchmarkV25','runRegressionSuiteV254'];
   const missingV25Api=v25ApiNames.filter(name=>typeof publicApi[name]!=='function');
   const apiCompatibility={requiredLegacy:compatibilityNames.length,missingLegacy:missingLegacyApi,missingV25:missingV25Api,pass:missingLegacyApi.length===0&&missingV25Api.length===0};
   const valid=Boolean(
@@ -25103,6 +25511,7 @@ function validateV25(options={}){
   // ── V25.0.0 PRO FINAL — Context-Aware Arabic Decision Engine ──
   V25_GOLD_CORPUS, V25_BLOCK_CORPUS, V25_AUTO_GOLD_CORPUS, V25_DECISION_TIERS, V25CandidateRegistry, V25ConflictResolver,
   V253_GOLD_CORPUS, V253_BLOCK_CORPUS, runRegressionSuiteV253, runV253RecallGapAudit,
+  V254_BLIND_SAFE_ORTHOGRAPHY, V254_BLIND_SAFE_PHRASES, V254_GOLD_CORPUS, V254_BLOCK_CORPUS, runRegressionSuiteV254, runV254RecallExpansionAudit,
   analyze: analyzeV25, check: analyzeV25, correct: correctV25, suggest: suggestV25,
   correctSafe: correctSafeV25, parse: parseV25, diacritize: diacritizeV25,
   inspectPOS: inspectPOSV25, inspectSyntax: inspectSyntaxV25, inspectDependencies: inspectDependenciesV25,
@@ -25122,10 +25531,16 @@ function validateV25(options={}){
     parse:parseV25, diacritize:diacritizeV25, validate:validateV25, validateData:validateV25Data, lexiconStats:lexiconStatsV25, pipelineDescription:pipelineDescriptionV25,
     runFullSuiteV25, runBenchmarkV25,
     recallGapV253:runV253RecallGapAudit, regressionV253:runRegressionSuiteV253,
-    V253_GOLD_CORPUS, V253_BLOCK_CORPUS}),
+    recallExpansionV254:runV254RecallExpansionAudit, regressionV254:runRegressionSuiteV254,
+    blindOrthographyV254:V254_BLIND_SAFE_ORTHOGRAPHY,
+    V253_GOLD_CORPUS, V253_BLOCK_CORPUS, V254_GOLD_CORPUS, V254_BLOCK_CORPUS}),
   V25_3_PRO: Object.freeze({version:V25_VERSION, edition:META.edition, analyze:analyzeV25, correct:correctV25, suggest:suggestV25,
     correctSafe:correctSafeV25, validate:validateV25, recallGapAudit:runV253RecallGapAudit,
     regression:runRegressionSuiteV253, runFullSuiteV25, runBenchmarkV25}),
+  V25_4_PRO: Object.freeze({version:V25_VERSION, edition:META.edition, analyze:analyzeV25, correct:correctV25, suggest:suggestV25,
+    correctSafe:correctSafeV25, validate:validateV25, blindOrthography:V254_BLIND_SAFE_ORTHOGRAPHY,
+    recallExpansionAudit:runV254RecallExpansionAudit, regression:runRegressionSuiteV254,
+    runFullSuiteV25, runBenchmarkV25, grammarPolicy:'review-only'}),
   // ── V21.0.0 PRO FINAL — المنادى والتعجب ──
   V21_PRO: Object.freeze({version: '21.0.0', edition: 'PRO-FINAL-V21.0',
     analyze: analyzePRO, validate: runFullSuiteV1920,
