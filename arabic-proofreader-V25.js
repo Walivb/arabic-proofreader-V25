@@ -1,7 +1,19 @@
 /*!
  * ============================================================================
- *  Arabic Proofreader V25.4.0 PRO FINAL — Blogger/GitHub Standalone Bundle
+ *  Arabic Proofreader V25.4.1 PRO FINAL — Blogger/GitHub Standalone Bundle
  *  ────────────────────────────────────────────────────────────────────────
+ *  V25.4.1 PRO FINAL (2026-08-29) — Precision-Safe Recall Expansion
+ *  ────────────────────────────────────────────────────────────────────────
+ *  V25.4.1: توسيع استدعاء مُحكم الدقة فوق V25.4.0 مع الحفظ التام لسلوكه:
+ *    ▸ إصلاحات مدعومة بالأدلة لتصحيحات خاطئة سابقة: «احمد الله» (قراءة الأمر)،
+ *      «فورا→فوري»، «سوف/لم + اكل/اخذ» (آكل/آخذ لا أكل/أخذ)، «ابدا» بعد نفي.
+ *    ▸ قاموس إملائي مراجع جديد أحادي الهدف (همزات وصل/قطع، ظروف تنوين النصب،
+ *      عبارات ثابتة) مع استبعاد مداخل مزدوجة القراءة (قران=قِران، ابني، امه...).
+ *    ▸ قاعدة سياقية: قطع همزة المضارع المسند للمتكلم بعد أداة تطلب المضارع،
+ *      دون المساس بصيغة الأمر الصحيحة (اذهب/اكتب) ولا المتصلة (فاذهب/واذهب).
+ *    ▸ وصل «و/ف+لكن» و«ال+اسم» بضوابط معجمية وسياقية صارمة.
+ *    ▸ استدعاء نحوي يدوي فقط (مراجعة): المنادى النكرة المقصودة، والمفعول لأجله
+ *      المنون بالرفع. لا تصحيح آلي لأي قاعدة نحوية جديدة.
  *  V25.4.0 PRO FINAL (2026-08-28) — Safe Blind Orthography + Deep Recall Expansion
  *  ────────────────────────────────────────────────────────────────────────
  *  V25.4.0: قاموس تصحيح إملائي آلي مغلق أحادي الهدف (وصل/قطع/همزات/تاء
@@ -23819,7 +23831,7 @@ function runV24AdditionBenchmarkV24(engine = {analyze}, options = {}) {
  * - overlapping candidate spans are conflict-resolved, not independently applied
  * - benchmark auto-correction precision is measured on exact end-to-end golds
  */
-const V25_VERSION = '25.4.0';
+const V25_VERSION = '25.4.1';
 const V25_DECISION_TIERS = Object.freeze({
   CERTAIN: 0.995,
   HIGH: 0.975,
@@ -23950,6 +23962,26 @@ function v25LegacySanitize(context, findings){
     }
     // V24.4.3 incorrectly treated «الان» as «أن» because «ان» was globally lexicalized.
     if(f.original==='الان' && f.replacement==='أن') continue;
+    // V25.4.1 — صون قراءة الأمر: «احمد الله» = اِحمدْ الله (أمر) أو أحمدُ الله (مضارع)؛
+    // التصحيح الآلي إلى اسم العلم «أحمد» يُفسد القراءتين، فالامتناع أولى.
+    if(f.original==='احمد' && f.replacement==='أحمد' && v2541AhmedFollowedByGod(context,f)) continue;
+    // V25.4.1 — «فورا» ظرف زمان شائع؛ قلبه الإنتاجي إلى «فوري» (صفة) تصحيح خاطئ.
+    if(String(f.ruleId||'')==='PRODUCTIVE_ALIF_MAQSURA_V187' && stripDiacritics(String(f.original||''))==='فورا') continue;
+    // V25.4.1 — «اكل/اخذ» بعد أداة تحسم المضارع قراءتها بالمَدّ (آكل/آخذ)؛ إبقاء
+    // البديل الماضي «أكل/أخذ» ينتج جملة غير نحوية («سوف أكل»). القاعدة
+    // V2541_GOVERNED_HAMZA_QAT3 تتولى توليد البديل الصحيح؛ هنا نكبح الماضي فقط.
+    if(((f.original==='اكل' && f.replacement==='أكل') || (f.original==='اخذ' && f.replacement==='أخذ'))
+       && v2541PrecededByPresentGovernor(context,f)) continue;
+    // V25.4.1 — «ابدا» بعد فعل منفي في الجملة ظرف «أبدًا» لا فعل «أبدأ»؛
+    // تُحجب القراءة الخاطئة وتتولى V2541_ABADAN_NEGATIVE_ADVERB توليد البديل.
+    if(f.original==='ابدا' && f.replacement==='أبدأ' && v2541AbadanContext(context,f)) continue;
+    // V25.4.1 — القراءة التفضيلية للمصدر المنون قبل «للـ» («حبٌ للوطن») غير
+    // صحيحة؛ يُكبح V24_COMPARATIVE_TANWIN ويتولى V2541_MAFOOL_LI_AJLIH_NASB البديل.
+    if(String(f.ruleId||'')==='V24_COMPARATIVE_TANWIN'){
+      const toks=context.tokens||[];
+      const ti=toks.findIndex(t=>t.type==='word' && Number(t.start)<=Number(f.index) && Number(t.end)>=Number(f.index)+Number(f.length||0));
+      if(ti>=0 && v2541IsLiajlihNominative(toks,ti)) continue;
+    }
     if((f.original==='ان'||f.original==='وان') && f.replacement==='أن' && !/\b(?:أريد|يريد|قال|ذكر|طلب|قرر)\s+ان\b/u.test(text)) continue;
     // Root-cause vetoes retained from V24 but centralized in V25.
     if(id==='V245_DITRANSITIVE_OBJECT1_CASE' && /^(?:سأل|سألت|يسأل|يسألون)(?:\s|$)/u.test(text)) continue;
@@ -25051,6 +25083,543 @@ function runV254RecallExpansionAudit(options={}){
     grammarPolicy:'review-only',falsePositiveFree:regression.failures.every(f=>!String(f.kind||'').startsWith('false-positive'))};
 }
 
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * V25.4.1 PRO — Precision-Safe Recall Expansion 1.0 (2026-08-29)
+ * ────────────────────────────────────────────────────────────────────────────
+ * فلسفة الإصدار: «لا تضحِّ بصحة النصوص الحالية من أجل زيادة الاكتشافات».
+ *  1) إصلاحات مدعومة بالأدلة لتصحيحات خاطئة موجودة (احمد الله/فورا/اكل-اخذ/ابدا).
+ *  2) قاموس إملائي مراجع جديد أحادي الهدف — كل مدخل رُوجع فرديًا ضد:
+ *     «مصادر إفعال» الرباعية الصحيحة الهمزة (إحسان/إكرام/إعلام لا تُمس)،
+ *     وقراءات الهمزة المزدوجة (قران = قِران لا تُمس)، وأسماء الأعلام.
+ *  3) قاعدة سياقية لقطع همزة المضارع المسند للمتكلم بعد ناصب/جازم/أداة
+ *     تطلب المضارع — لا تعمل على «اذهب» المبتدأ به (أمر صحيح) ولا على
+ *     «فاذهب/واذهب» المتصلة (قراءة الأمر قائمة).
+ *  4) وصل «و/ف + لكن» و«ال + اسم» بضوابط معجمية وسياقية صارمة.
+ *  5) استدعاء نحوي يدوي فقط: المنادى النكرة المقصودة، والمفعول لأجله
+ *     المنون بالرفع. لا تصحيح آلي لأي قاعدة نحوية جديدة.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── (أ) قاموس إملائي مراجع أحادي الهدف ────────────────────────────────────
+ * كل مدخل له بديل قياسي واحد فقط ولا قراءة فصيحة بديلة للرسم الخاطئ.
+ * استُبعدت عمدًا: مصادر أفعل الرباعية (إحسان/إكرام/إعلام/إصلاح...)،
+ * «قران» (قِران صحيح)، «ابدا» (غموض أبدأ/أبدًا)، «ابني/ابن» (همزة وصل صحيحة)،
+ * «امه» (أمة/أمّه)، «اخوان» (أخوان/إخوان)، «فعلا/احيانا» (احتمال قراءة مثنى/فعل). */
+const V2541_SAFE_ORTHOGRAPHY = Object.freeze({
+  /* همزة وصل: مصادر وأفعال افتعل/انفعل/استفعل رُسمت بهمزة قطع خطأً. */
+  'إختبار':'اختبار', 'إختيار':'اختيار', 'إختلاف':'اختلاف', 'إعتذار':'اعتذار',
+  'إعتقاد':'اعتقاد', 'إعتماد':'اعتماد', 'إهتمام':'اهتمام', 'إبتسامة':'ابتسامة',
+  'إبتكار':'ابتكار', 'إحتفال':'احتفال', 'إتحاد':'اتحاد', 'إمتحان':'امتحان',
+  'إقتصاد':'اقتصاد', 'إفتتاح':'افتتاح', 'إرتباط':'ارتباط', 'إضطراب':'اضطراب',
+  'إحتياج':'احتياج', 'إحتراف':'احتراف', 'إكتشاف':'اكتشاف', 'إختراع':'اختراع',
+  'إستماع':'استماع', 'إستجابة':'استجابة', 'إستشارة':'استشارة', 'إستخدام':'استخدام',
+  'إستمرار':'استمرار', 'إستقبال':'استقبال', 'إستعداد':'استعداد', 'إشتراك':'اشتراك',
+  'إنسحاب':'انسحاب', 'إندلاع':'اندلاع', 'إلتحاق':'التحاق', 'إلتزام':'التزام',
+  'إمتناع':'امتناع', 'إمتنان':'امتنان', 'إفتخار':'افتخار', 'إفتراض':'افتراض',
+  'إحتمال':'احتمال', 'إحتياط':'احتياط', 'إنتخاب':'انتخاب', 'إنتخابات':'انتخابات', 'إنتقاد':'انتقاد',
+  'إختراق':'اختراق', 'إحتلال':'احتلال', 'إحتراق':'احتراق', 'إجتهاد':'اجتهاد',
+  'إبتعاد':'ابتعاد', 'إبتلاء':'ابتلاء', 'إشتياق':'اشتياق', 'إشتهار':'اشتهار',
+  'إشتغال':'اشتغال', 'إرتياح':'ارتياح', 'إرتفاع':'ارتفاع', 'إرتكاب':'ارتكاب',
+  'إستسلام':'استسلام', 'إستطلاع':'استطلاع', 'إستئذان':'استئذان', 'إستحقاق':'استحقاق',
+  'إستشهاد':'استشهاد', 'إستعمار':'استعمار',
+  /* همزة قطع: ألف أول الكلمة في أسماء شائعة (لا قراءة وصلية لها). */
+  'امي':'أمي', 'امك':'أمك', 'ابي':'أبي', 'ابوك':'أبوك',
+  'اخت':'أخت', 'اختي':'أختي', 'اختك':'أختك', 'اخوات':'أخوات', 'اخوة':'إخوة',
+  'اجل':'أجل', 'اسبوع':'أسبوع', 'اسابيع':'أسابيع', 'اصحاب':'أصحاب',
+  'اطفال':'أطفال', 'اشياء':'أشياء', 'اوقات':'أوقات', 'اوراق':'أوراق',
+  'اصدقاء':'أصدقاء', 'اخذت':'أخذت', 'اخذنا':'أخذنا', 'اخذوا':'أخذوا',
+  'الاسبوع':'الأسبوع', 'الاسابيع':'الأسابيع', 'الاطفال':'الأطفال',
+  'الاشياء':'الأشياء', 'الاوقات':'الأوقات', 'الاوراق':'الأوراق',
+  'الاصدقاء':'الأصدقاء',
+  /* همزات ورسوم أخرى مراجعة. */
+  'بإسم':'باسم', 'بأسم':'باسم', 'لاجل':'لأجل',
+  'القرأن':'القرآن', 'قرأن':'قرآن',
+  'مسئوليتك':'مسؤوليتك', 'مسئوليتنا':'مسؤوليتنا',
+  /* ظروف منصوبة شائعة ناقصة ألف تنوين النصب (صنف «عذرا/شكرا» المراجع).
+     استُبعدت: غدا (غدًا/غدا فعل)، ابدا (أبدًا/أبدأ)، احيانا (أحيانًا/أحيانا). */
+  'اولا':'أولًا', 'ثانيا':'ثانيًا', 'ثالثا':'ثالثًا', 'رابعا':'رابعًا',
+  'خامسا':'خامسًا', 'سادسا':'سادسًا', 'سابعا':'سابعًا', 'ثامنا':'ثامنًا',
+  'تاسعا':'تاسعًا', 'عاشرا':'عاشرًا', 'اخيرا':'أخيرًا',
+  'طبعا':'طبعًا', 'مثلا':'مثلًا', 'جزيلا':'جزيلًا', 'اهلا':'أهلًا', 'سهلا':'سهلًا',
+  'عموما':'عمومًا', 'غالبا':'غالبًا', 'يوميا':'يوميًا',
+  'تقريبا':'تقريبًا', 'تماما':'تمامًا', 'لاحقا':'لاحقًا', 'تحديدا':'تحديدًا',
+  'حتما':'حتمًا', 'مطلقا':'مطلقًا', 'نسبيا':'نسبيًا', 'نهائيا':'نهائيًا',
+  'حاليا':'حاليًا', 'سنويا':'سنويًا', 'شهريا':'شهريًا', 'اساسيا':'أساسيًا',
+  'مستقبلا':'مستقبلًا', 'مبدئيا':'مبدئيًا', 'فعليا':'فعليًا', 'عمليا':'عمليًا',
+  'علميا':'علميًا', 'ثقافيا':'ثقافيًا', 'اجتماعيا':'اجتماعيًا', 'اقتصاديا':'اقتصاديًا',
+  'سياسيا':'سياسيًا', 'طبيعيا':'طبيعيًا', 'شخصيا':'شخصيًا', 'رسميا':'رسميًا',
+  'دوليا':'دوليًا', 'محليا':'محليًا', 'كاملا':'كاملًا', 'سريعا':'سريعًا',
+  'مسرعا':'مسرعًا', 'فورا':'فورًا', 'حالا':'حالًا', 'عاجلا':'عاجلًا', 'دائما':'دائمًا'
+});
+
+/* عبارات ثابتة بصيغة صحيحة واحدة محسومة. */
+const V2541_SAFE_PHRASES = Object.freeze({
+  'لا اله الا الله':'لا إله إلا الله',
+  'لا الاه الا الله':'لا إله إلا الله'
+});
+
+/* ── (ب) همزة قطع المضارع المسند للمتكلم بعد أداة تطلب المضارع ─────────────
+ * «سوف اذهب/لم اكتب/هل اشرب»: القراءة الأمرية مستحيلة بعد هذه الأدوات،
+ * فالهمزة قطع محسومة. لا تعمل القاعدة على الفعل المبتدأ به ولا على
+ * «فاذهب/واذهب» المتصلة (قراءة الأمر قائمة هناك). */
+const V2541_GOVERNED_HAMZA_QAT3 = Object.freeze({
+  'اذهب':'أذهب', 'اكتب':'أكتب', 'اجلس':'أجلس', 'ادرس':'أدرس', 'اشرب':'أشرب',
+  'العب':'ألعب', 'افهم':'أفهم', 'اعمل':'أعمل', 'اتعلم':'أتعلم', 'اجتهد':'أجتهد',
+  'اساعد':'أساعد', 'اشاهد':'أشاهد', 'ارسم':'أرسم', 'اسمع':'أسمع',
+  'اشتري':'أشتري', 'اشترك':'أشترك', 'ابحث':'أبحث', 'انسى':'أنسى',
+  'ارجو':'أرجو', 'اعتقد':'أعتقد', 'اود':'أود', 'اظن':'أظن', 'افكر':'أفكر',
+  'اشكر':'أشكر', 'اعطي':'أعطي', 'احضر':'أحضر', 'احاول':'أحاول',
+  'استطيع':'أستطيع', 'استخدم':'أستخدم', 'استفيد':'أستفيد', 'اشعر':'أشعر',
+  'اعيش':'أعيش', 'انصح':'أنصح', 'اشرح':'أشرح', 'افضل':'أفضل', 'انوي':'أنوي',
+  'اتمكن':'أتمكن', 'اسافر':'أسافر', 'ابيع':'أبيع', 'اشتاق':'أشتاق', 'اغسل':'أغسل'
+});
+/* أدوات يُحسم بعدها لزوم المضارع (منفصلة بمسافة). تُقبل مركبات واو/فاء العطف. */
+const V2541_PRESENT_GOVERNORS = Object.freeze(new Set([
+  'سوف','لن','لم','أن','ان','كي','لكي','حتى','لا','ما','هل','قد','بل','ثم','لما','إذن','لكن'
+]));
+/* «اكل/اخذ»: البديل الصحيح بعد أداة المضارع هو المَدّ (آكل/آخذ) لا «أكل/أخذ»
+ * الماضيين؛ ولأن «هل أكل/قد أخذ» قراءة ماضية صحيحة تُقصر هذه الخريطة على
+ * الأدوات الحاسمة فقط، وتطابق تمامًا مجموعة كبح البديل الماضي في V25LegacySanitize. */
+const V2541_GOVERNED_HAMZA_MADDA = Object.freeze({
+  'اكل':'آكل', 'اخذ':'آخذ'
+});
+const V2541_STRICT_PRESENT_GOVERNORS = Object.freeze(new Set([
+  'سوف','لم','لن','أن','ان','كي','لكي','حتى','لما',
+  'وسوف','ولم','ولن','فسوف','فلم','فلن','وأن','وان','فأن','فان',
+  'ولكي','فلكي','وحتى','فحتى','ولما','فلما'
+]));
+
+/* ── (ج) المنادى النكرة المقصودة ──────────────────────────────────────────── */
+const V2541_MUNADA_PARTICLES = Object.freeze(new Set(['يا','أيا']));
+/* إن جاء بعد المنادى اسمٌ صالحٌ لأن يكون مضافًا إليه فالنصب قراءة صحيحة. */
+const V2541_MUDAF_ILAYH_POS = Object.freeze(new Set(['noun','proper','adj','demonstrative','relative','number']));
+
+/* ── (د) المفعول لأجله المنون بالرفع ────────────────────────────────────────
+ * «سافر المعلم احترامٌ للقانون»: المصدر منصوب، ورفعُه خطأ. تُعمل القاعدة فقط
+ * حين يسبقه فعلٌ من قائمة مبيحة (مع فاعل وسيط أو فاعل متصل بالفعل)، وحين يليه
+ * مباشرة «للـ». وبهذا لا تُمس «جاء احترامٌ للقانون» (فاعل) ولا
+ * «كان احترامٌ للقانون واجبًا» (اسم كان). */
+const V2541_LI_AJLIH_VERBS = Object.freeze(new Set([
+  'سافر','وقف','عمل','اجتهد','درس','ذهب','حضر','غادر','عاد','قام',
+  'ضحى','جاهد','صبر','التزم','أنفق','تبرع','خدم','سعى','بذل','ناضل',
+  'كافح','حرص','شارك','ساهم'
+]));
+
+/* ── أدوات مساعدة ── */
+function v2541PrevWordToken(tokens, i){
+  let p=i-1;
+  while(p>=0 && tokens[p] && tokens[p].type!=='word') p--;
+  return p>=0 ? tokens[p] : null;
+}
+function v2541NextWordToken(tokens, i){
+  let n=i+1;
+  while(n<tokens.length && tokens[n] && tokens[n].type!=='word') n++;
+  return n<tokens.length ? tokens[n] : null;
+}
+
+/* حارس «احمد الله»: القراءة الأمرية (اِحمدْ الله) أو المضارعة (أحمدُ الله)
+ * صحيحتان معًا؛ التصحيح الآلي إلى اسم العلم «أحمد» يُفسد القراءتين. */
+function v2541AhmedFollowedByGod(context, finding){
+  const text=String(context.original||'');
+  const after=text.slice(Number(finding.index)+Number(finding.length||String(finding.original||'').length));
+  return /^\s*(?:الله|رب|ربك|ربكم|ربنا|ربه|ربها|ربهم|الإله)(?=\s|[.!؟،؛:»]|$)/u.test(after);
+}
+/* هل يسبق «اكل/اخذ» أداةٌ تحسم قراءة المضارع (فيكون البديل الماضي خطأ)؟ */
+function v2541PrecededByPresentGovernor(context, finding){
+  const text=String(context.original||'');
+  const before=text.slice(0,Number(finding.index));
+  const m=/(?:^|\s)([^.\s]+)\s+$/u.exec(before);
+  if(!m) return false;
+  return V2541_STRICT_PRESENT_GOVERNORS.has(stripDiacritics(m[1]));
+}
+/* هل المصدر المنون بالرفع في موضع مفعول لأجله؟ (فعل مبيح + فاعل وسيط أو
+ * متصل + «للـ» بعده مباشرة). يُستعمل للقاعدة ولكبح V24_COMPARATIVE_TANWIN
+ * حين ينافسها على النطاق نفسه بقراءة تفضيلية غير صحيحة. */
+function v2541IsLiajlihNominative(tokens, idx){
+  const t=tokens[idx];
+  if(!t || t.type!=='word') return false;
+  const core=stripDiacritics((t.morph&&t.morph.core)||t.clean||t.surface||'');
+  if(!V25_MAFOOL_LI_AJLIH.has(core)) return false;
+  const vis=t.visibleCase;
+  if(!vis || vis.kind!=='tanwin' || vis.case!=='nominative') return false;
+  const seg=(t.morph&&t.morph.segments)||null;
+  if(t.morph&&(t.morph.definite||(seg&&(seg.article||seg.enclitic)))) return false;
+  const nxt=v2541NextWordToken(tokens,idx);
+  if(!nxt || nxt.sentence!==t.sentence || !/^لل/u.test(stripDiacritics(nxt.surface||''))) return false;
+  const vbLike=(tok)=>{
+    if(!tok) return {ok:false,attached:false};
+    const c=stripDiacritics((tok.morph&&tok.morph.core)||tok.clean||tok.surface||'');
+    const attached=/[تنا]$/u.test(c)&&c.length>2;
+    if(V2541_LI_AJLIH_VERBS.has(c)) return {ok:true,attached};
+    const vb=bestVerb(tok);
+    if(vb && V2541_LI_AJLIH_VERBS.has(stripDiacritics(vb.lemma||''))) return {ok:true,attached};
+    return {ok:false,attached:false};
+  };
+  const p1=v2541PrevWordToken(tokens,idx);
+  if(!p1 || p1.sentence!==t.sentence) return false;
+  const v1=vbLike(p1);
+  if(v1.ok && v1.attached) return true;
+  if(p1.morph && ['noun','proper','adj'].includes(String(p1.morph.pos))){
+    const p2=v2541PrevWordToken(tokens,tokens.indexOf(p1));
+    if(p2 && p2.sentence===t.sentence && vbLike(p2).ok) return true;
+  }
+  return false;
+}
+/* هل «ابدا» في موضع ظرف استغراق منفي (نفي + وسيط كلامي + ابدا)؟ */
+function v2541AbadanContext(context, finding){
+  const tokens=context.tokens||[];
+  const idx=tokens.findIndex(t=>t.type==='word' && Number(t.start)<=Number(finding.index) && Number(t.end)>=Number(finding.index)+Number(finding.length||0));
+  if(idx<0) return false;
+  let negIdx=-1, wordBetween=false;
+  for(let j=Math.max(0,idx-8);j<idx;j++){
+    const w=tokens[j];
+    if(!w || w.type!=='word' || w.sentence!==tokens[idx].sentence) continue;
+    const wc=stripDiacritics(w.surface||'');
+    if(negIdx<0 && /^(?:لن|لم|لا|ما|لما|لمّا|ولن|فلن|ولم|فلم|فلا|ولا|وما|فما|ولما|فلما)$/u.test(wc)) negIdx=j;
+    else if(negIdx>=0) wordBetween=true;
+  }
+  return negIdx>=0 && wordBetween;
+}
+
+/* ── قواعد الإضافة V25.4.1 ── */
+function v2541AddOrthography(context, out, seen){
+  const text=String(context.original||'');
+  const boundary='[^\\u0621-\\u064A\\u064B-\\u065F]';
+  const insidePhrase=(start,length)=>Object.keys(V2541_SAFE_PHRASES).some(phrase=>{
+    let at=text.indexOf(phrase);
+    while(at>=0){
+      if(at<=start && at+phrase.length>=start+length) return true;
+      at=text.indexOf(phrase,at+1);
+    }
+    return false;
+  });
+  const add=(start,bad,good,ruleId,family,confidence=.9999,allowInsidePhrase=false)=>{
+    if(!bad || !good || bad===good || v25IsProtected(context,start,bad.length)) return;
+    if(text.slice(start,start+bad.length)!==bad) return;
+    if(!allowInsidePhrase && insidePhrase(start,bad.length)) return;
+    const f=v25Finding(context,{start,length:bad.length,replacement:good,ruleId,confidence,
+      explanation:`تصحيح إملائي مراجع أحادي الهدف: «${bad}» ← «${good}».`,
+      evidence:['v2541-reviewed-lexicon','single-valid-target',family],safe:true,type:'إملائي',
+      classification:'orthographic',metadata:{v25:true,v2541:true,reviewed:true,family}});
+    const key=`${f.index}|${f.length}|${f.replacement}`;
+    if(!seen.has(key)){ seen.add(key); out.push(f); }
+  };
+  /* عبارات ثابتة. */
+  for(const [bad,good] of Object.entries(V2541_SAFE_PHRASES)){
+    const re=new RegExp(`(^|${boundary})${v254Esc(bad)}(?=$|${boundary})`,'gu'); let m;
+    while((m=re.exec(text))){ const start=m.index+(m[1]?m[1].length:0); add(start,bad,good,'V2541_JOINING_PHRASE','joining-and-separation',.9999,true); }
+  }
+  /* قاموس مراجع. */
+  for(const [bad,good] of Object.entries(V2541_SAFE_ORTHOGRAPHY)){
+    const re=new RegExp(`(^|${boundary})${v254Esc(bad)}(?=$|${boundary})`,'gu'); let m;
+    while((m=re.exec(text))){ const start=m.index+(m[1]?m[1].length:0); add(start,bad,good,'V2541_ORTHOGRAPHY_REVIEWED','reviewed-orthography'); }
+  }
+  /* وصل «و/ف + لكن»: حرف العطف لا ينفصل عن لكن. */
+  const conjRe=/([وف])[ \u00A0\u202F]+(?=لكن)/gu; let cm;
+  while((cm=conjRe.exec(text))){
+    const start=cm.index+1, len=cm[0].length-1;
+    if(v25IsProtected(context,start,len) || insidePhrase(start,len)) continue;
+    const f=v25Finding(context,{start,length:len,replacement:'',ruleId:'V2541_SPACING:attach-conjunction',
+      confidence:.995,
+      explanation:'الواو والفاء حرفا عطف يتصلان بما بعدهما؛ «لكن» لا تُفصل عن حرف العطف.',
+      evidence:['spacing-attach','conjunction-attachment'],safe:true,type:'مسافات',classification:'spacing',
+      metadata:{severityOverride:'STYLE',v2541:true}});
+    const key=`${f.index}|${f.length}|${f.replacement}`;
+    if(!seen.has(key)){ seen.add(key); out.push(f); }
+  }
+  /* وصل «ال» المنفصلة عن كلمتها: بضوابط معجمية وسياقية.
+     لا تُوصل: قبل ذكر أداة التعريف لغةً («أداة ال التعريف»)، ولا قبل
+     «ال» مكررة أو لامٍ أو علمٍ، ولا إن لم يكن المركب كلمة معروفة. */
+  const tokens=context.tokens||[];
+  for(let i=0;i<tokens.length-1;i++){
+    const t=tokens[i];
+    if(!t || t.type!=='word') continue;
+    if(stripDiacritics(t.surface||'')!=='ال') continue;
+    const nxt=tokens[i+1];
+    if(!nxt || nxt.type!=='word' || nxt.sentence!==t.sentence) continue;
+    const ncore=stripDiacritics(nxt.surface||'');
+    if(!ncore || ncore.startsWith('ال') || /^ل/u.test(ncore)) continue;
+    const prevWord=v2541PrevWordToken(tokens,i);
+    const prevCore=prevWord&&prevWord.sentence===t.sentence ? stripDiacritics(prevWord.surface||'') : '';
+    if(['أداة','حرف','لام','الألف','الهمزة','همزة'].includes(prevCore)) continue;
+    if(['التعريف','قمرية','شمسية'].includes(ncore)) continue;
+    if(nxt.morph && nxt.morph.pos==='proper') continue;
+    const combined='ال'+ncore;
+    if(!knownCore(combined)) continue;
+    const start=Number(t.start), length=Number(nxt.end)-Number(t.start);
+    if(!Number.isFinite(start) || length<=0 || v25IsProtected(context,start,length)) continue;
+    const f=v25Finding(context,{start,length,replacement:combined,ruleId:'V2541_SPACING:attach-article',
+      confidence:.98,
+      explanation:'أداة التعريف «ال» تتصل بالاسم الذي تعرّفه ولا تُفصل عنه بمسافة.',
+      evidence:['spacing-attach','article-attachment','known-lexeme'],safe:true,type:'مسافات',classification:'spacing',
+      metadata:{severityOverride:'STYLE',v2541:true}});
+    const key=`${f.index}|${f.length}|${f.replacement}`;
+    if(!seen.has(key)){ seen.add(key); out.push(f); }
+  }
+  /* همزة قطع المضارع المحكوم. */
+  const isGovernor=(core,set)=>set.has(core)
+    || (core.length>1 && /^[وف]/u.test(core) && set.has(core.slice(1)));
+  for(let i=1;i<tokens.length;i++){
+    const t=tokens[i];
+    if(!t || t.type!=='word') continue;
+    const surface=String(t.surface||'');
+    const core=stripDiacritics(surface);
+    const target=V2541_GOVERNED_HAMZA_QAT3[core] || null;
+    const madda=V2541_GOVERNED_HAMZA_MADDA[core] || null;
+    if(!target && !madda) continue;
+    const seg=(t.morph&&t.morph.segments)||null;
+    if(seg && (seg.conjunction || seg.preposition || seg.article || seg.enclitic)) continue;
+    const prev=v2541PrevWordToken(tokens,i);
+    if(!prev || prev.sentence!==t.sentence) continue;
+    const prevCore=stripDiacritics(prev.surface||'');
+    if(madda){
+      if(!isGovernor(prevCore,V2541_STRICT_PRESENT_GOVERNORS)) continue;
+    } else if(!isGovernor(prevCore,V2541_PRESENT_GOVERNORS)){
+      continue;
+    }
+    const tail=(surface.match(/[\u064B-\u0652]+$/u)||[''])[0];
+    const replacement=(madda||target)+tail;
+    const start=Number(t.start), length=Number(t.end)-Number(t.start);
+    if(!Number.isFinite(start) || length<=0 || v25IsProtected(context,start,length)) continue;
+    const f=v25Finding(context,{start,length,replacement,ruleId:'V2541_GOVERNED_HAMZA_QAT3',
+      confidence:.995,
+      explanation:'فعل مضارع مسند إلى المتكلم بعد أداة تطلب المضارع؛ همزته همزة قطع «أ».',
+      evidence:['governed-present','first-person-qat3',`governor:${prevCore}`],safe:true,type:'إملائي',
+      classification:'orthographic',metadata:{v25:true,v2541:true,reviewed:true,governedHamza:true}});
+    const key=`${f.index}|${f.length}|${f.replacement}`;
+    if(!seen.has(key)){ seen.add(key); out.push(f); }
+  }
+  /* «ابدا» بعد فعل منفي في الجملة نفسها = ظرف الاستغراق «أبدًا». مراجعة يدوية
+     لا تصحيح آلي، لأن «أبدأ» قراءة محتملة في مواضع أخرى. */
+  for(let i=0;i<tokens.length;i++){
+    const t=tokens[i];
+    if(!t || t.type!=='word') continue;
+    if(stripDiacritics(t.surface||'')!=='ابدا') continue;
+    let negIdx=-1, wordBetween=false;
+    for(let j=Math.max(0,i-8);j<i;j++){
+      const w=tokens[j];
+      if(!w || w.type!=='word' || w.sentence!==t.sentence) continue;
+      const wc=stripDiacritics(w.surface||'');
+      if(negIdx<0 && /^(?:لن|لم|لا|ما|لما|لمّا|ولن|فلن|ولم|فلم|فلا|ولا|وما|فما|ولما|فلما)$/u.test(wc)) negIdx=j;
+      else if(negIdx>=0) wordBetween=true;
+    }
+    if(negIdx<0 || !wordBetween) continue;
+    const start=Number(t.start), length=Number(t.end)-Number(t.start);
+    if(!Number.isFinite(start) || length<=0 || v25IsProtected(context,start,length)) continue;
+    const f=v25Finding(context,{start,length,replacement:'أبدًا',ruleId:'V2541_ABADAN_NEGATIVE_ADVERB',
+      confidence:.96,
+      explanation:'«ابدا» بعد فعل منفي في الجملة ظرف استغراق منصوب «أبدًا»، لا فعل «أبدأ».',
+      evidence:['negative-adverb','negation-scope','intervening-verb'],safe:false,type:'إملائي',
+      classification:'orthographic',metadata:{v25:true,v2541:true,manualOnly:true}});
+    const key=`${f.index}|${f.length}|${f.replacement}`;
+    if(!seen.has(key)){ seen.add(key); out.push(f); }
+  }
+}
+
+/* ── استدعاء نحوي يدوي (مراجعة فقط، لا تصحيح آلي) ── */
+function v2541AddGrammarRecall(context, out, seen){
+  const tokens=context.tokens||[];
+  const addGrammar=(token,replacement,ruleId,explanation,evidence,confidence,resolver)=>{
+    if(!token || !replacement || replacement===v254TokenSurface(token)) return;
+    const start=Number(token.start), length=Number(token.end)-Number(token.start);
+    if(!Number.isFinite(start) || length<=0 || v25IsProtected(context,start,length)) return;
+    const f=findingFromSpan(context,{startToken:token,replacement,ruleId,type:'نحوي',
+      classification:'syntactic-case',confidence,explanation,evidence,safe:false,
+      metadata:{v25:true,v2541:true,reviewed:true,resolver}});
+    f.manualOnly=true;
+    const key=`${f.index}|${f.length}|${f.replacement}`;
+    if(!seen.has(key)){ seen.add(key); out.push(f); }
+  };
+  /* (1) المنادى النكرة المقصودة: فتحة ظاهرة بلا مضاف إليه بعده ⇒ ضمة. */
+  for(let i=0;i<tokens.length-1;i++){
+    const ya=tokens[i];
+    if(!ya || ya.type!=='word') continue;
+    if(!V2541_MUNADA_PARTICLES.has(stripDiacritics(ya.surface||''))) continue;
+    const called=tokens[i+1];
+    if(!called || called.type!=='word' || called.sentence!==ya.sentence) continue;
+    const pos=String((called.morph&&called.morph.pos)||'');
+    if(!['noun','adj','proper'].includes(pos)) continue;
+    const seg=(called.morph&&called.morph.segments)||null;
+    /* الأعلام المناداة (يا محمدَ) معرَّفة لفظًا لكنها كالنكرة المقصودة حكمًا؛
+       يُستثنى العلم من شرط التنكير مع بقاء حجب «ال» والضمير المتصل. */
+    if(called.morph&&((seg&&(seg.article||seg.enclitic)) || (pos!=='proper' && called.morph.definite))) continue;
+    const vis=called.visibleCase;
+    if(!vis || (vis.kind!=='vowel' && vis.kind!=='haraka') || vis.case!=='accusative') continue;
+    const nxt=v2541NextWordToken(tokens,i+1);
+    if(nxt && nxt.sentence===called.sentence
+       && V2541_MUDAF_ILAYH_POS.has(String((nxt.morph&&nxt.morph.pos)||''))) continue;
+    addGrammar(called,v254SingleVowelCase(called.surface,'ُ'),'V2541_MUNADA_NAKIRA_MAQSUDA',
+      'المنادى النكرة المقصودة مبني على الضم في محل نصب؛ والفتحة الظاهرة هنا ليست قراءة إضافة لعدم وجود مضاف إليه بعدها.',
+      ['vocative:يا','nakira-maqsuda','no-mudaf-ilayh'],.88,'MunadaNakiraMaqsuda-1.0');
+  }
+  /* (2) المفعول لأجله المنون بالرفع قبل «للـ». */
+  for(let i=1;i<tokens.length;i++){
+    const t=tokens[i];
+    if(!t || t.type!=='word') continue;
+    if(!v2541IsLiajlihNominative(tokens,i)) continue;
+    addGrammar(t,v254CaseSurface(t,'accusative'),'V2541_MAFOOL_LI_AJLIH_NASB',
+      'المفعول لأجله منصوب؛ ورفعُه بالتنوين قبل «للـ» خطأ في الإعراب.',
+      ['mafool-li-ajlih','nominative-tanwin','li-clitic-after','licensing-verb'],.9,'MafoolLiAjlihNasb-1.0');
+  }
+}
+
+/* ── مجموعة الانحدار V25.4.1 ── */
+const V2541_GOLD_CORPUS = Object.freeze([
+  {id:'v2541-wasl-ikhtibar',text:'إختبار الرياضيات سهل.',expected:'اختبار'},
+  {id:'v2541-wasl-istiqbal',text:'وصل إستقبال الضيوف مبكرا.',expected:'استقبال'},
+  {id:'v2541-wasl-iltizam',text:'إلتزام المواعيد واجب.',expected:'التزام'},
+  {id:'v2541-wasl-imtihan',text:'نجح في إمتحان صعب.',expected:'امتحان'},
+  {id:'v2541-wasl-iqtisad',text:'نما إقتصاد البلاد.',expected:'اقتصاد'},
+  {id:'v2541-wasl-ihtimal',text:'هذا إحتمال وارد.',expected:'احتمال'},
+  {id:'v2541-wasl-intikhab',text:'جرت إنتخابات حرة.',expected:'انتخاب'},
+  {id:'v2541-wasl-irtifa3',text:'إرتفاع الأسعار مستمر.',expected:'ارتفاع'},
+  {id:'v2541-qat3-ummi',text:'امي معلمة فاضلة.',expected:'أمي'},
+  {id:'v2541-qat3-abi',text:'رأيت ابي في الحديقة.',expected:'أبي'},
+  {id:'v2541-qat3-ukhti',text:'اخت الطالب مجتهدة.',expected:'أخت'},
+  {id:'v2541-qat3-ajal',text:'اجل سأحضر مبكرا.',expected:'أجل'},
+  {id:'v2541-qat3-usbu3',text:'مضى اسبوع كامل.',expected:'أسبوع'},
+  {id:'v2541-qat3-atfal',text:'لعب الاطفال في الحديقة.',expected:'الأطفال'},
+  {id:'v2541-qat3-ashyaa',text:'حمل اشياء كثيرة.',expected:'أشياء'},
+  {id:'v2541-biism',text:'بدأ بإسم الله.',expected:'باسم'},
+  {id:'v2541-biasm',text:'كتب بأسم الأب.',expected:'باسم'},
+  {id:'v2541-liajl',text:'جئت لاجل المساعدة.',expected:'لأجل'},
+  {id:'v2541-quran',text:'قرأت القرأن كاملا.',expected:'القرآن'},
+  {id:'v2541-masuliyya',text:'هذه مسئوليتك.',expected:'مسؤوليتك'},
+  {id:'v2541-tanwin-awwalan',text:'اولا يجب أن نتعلم.',expected:'أولًا'},
+  {id:'v2541-tanwin-thania',text:'ثانيا سأشرح الدرس.',expected:'ثانيًا'},
+  {id:'v2541-tanwin-akhiran',text:'اخيرا وصلنا.',expected:'أخيرًا'},
+  {id:'v2541-tanwin-tab3an',text:'طبعا سأحضر.',expected:'طبعًا'},
+  {id:'v2541-tanwin-mathalan',text:'مثلا هذه الجملة.',expected:'مثلًا'},
+  {id:'v2541-tanwin-jazilan',text:'جزيلا لك الشكر.',expected:'جزيلًا'},
+  {id:'v2541-tanwin-ahlan',text:'اهلا وسهلا.',expected:'أهلًا'},
+  {id:'v2541-tanwin-umuman',text:'عموما الوضع جيد.',expected:'عمومًا'},
+  {id:'v2541-tanwin-ghaliban',text:'غالبا ما يتأخر.',expected:'غالبًا'},
+  {id:'v2541-tanwin-yawmian',text:'يقرأ يوميا.',expected:'يوميًا'},
+  {id:'v2541-tanwin-taqriban',text:'النتيجة جيدة تقريبا.',expected:'تقريبًا'},
+  {id:'v2541-tanwin-tamaman',text:'المهمة مكتملة تماما.',expected:'تمامًا'},
+  {id:'v2541-tanwin-lahiqan',text:'سأكمل لاحقا.',expected:'لاحقًا'},
+  {id:'v2541-tanwin-mustaqbalan',text:'سنناقشه مستقبلا.',expected:'مستقبلًا'},
+  {id:'v2541-tanwin-kamilan',text:'قرأ الكتاب كاملا.',expected:'كاملًا'},
+  {id:'v2541-tanwin-sarian',text:'عاد سريعا.',expected:'سريعًا'},
+  {id:'v2541-tanwin-fawran',text:'اتصل بي فورا.',expected:'فورًا'},
+  {id:'v2541-gov-sawfa',text:'سوف اذهب إلى السوق.',expected:'أذهب'},
+  {id:'v2541-gov-lam',text:'لم اكتب الواجب.',expected:'أكتب'},
+  {id:'v2541-gov-lan',text:'لن اجلس هنا.',expected:'أجلس'},
+  {id:'v2541-gov-an',text:'أريد أن ادرس.',expected:'أدرس'},
+  {id:'v2541-gov-hal',text:'هل اشرب الماء؟',expected:'أشرب'},
+  {id:'v2541-gov-kay',text:'ذاكرت كي اتعلم.',expected:'أتعلم'},
+  {id:'v2541-gov-hatta',text:'اجتهدت حتى اعمل.',expected:'أعمل'},
+  {id:'v2541-gov-la',text:'لا انسى فضلك.',expected:'أنسى'},
+  {id:'v2541-gov-ma',text:'ما اظن ذلك.',expected:'أظن'},
+  {id:'v2541-gov-lakin',text:'لكن ارجو المساعدة.',expected:'أرجو'},
+  {id:'v2541-gov-akul',text:'لم اكل بعد.',expected:'آكل'},
+  {id:'v2541-gov-akhudh',text:'سوف اخذ الكتاب.',expected:'آخذ'},
+  {id:'v2541-gov-wasawfa',text:'وسوف احضر غدا.',expected:'أحضر'},
+  {id:'v2541-gov-flan',text:'فلن اترك واجبي.',expected:'أترك'},
+  {id:'v2541-space-walakin',text:'و لكنه لم يحضر.',expected:'ولكن'},
+  {id:'v2541-space-falakin',text:'ف لكنها نجحت.',expected:'فلكن'},
+  {id:'v2541-space-al',text:'هذا ال يوم جميل.',expected:'اليوم'},
+  {id:'v2541-space-al2',text:'قرأت ال كتاب.',expected:'الكتاب'},
+  {id:'v2541-phrase-tahlil',text:'لا اله الا الله.',expected:'إله'},
+  {id:'v2541-phrase-tahlil2',text:'لا الاه الا الله.',expected:'إله'},
+  {id:'v2541-munada-talib',text:'يا طالبَ اجتهد.',expected:'طالبُ'},
+  {id:'v2541-munada-rajul',text:'يا رجلَ لا تتكاسل.',expected:'رجلُ'},
+  {id:'v2541-munada-muhammad',text:'يا محمدَ اجتهد.',expected:'محمدُ'},
+  {id:'v2541-munada-fatima',text:'يا فاطمةَ اجتهدي.',expected:'فاطمةُ'},
+  {id:'v2541-ajl-safar',text:'سافر المعلم احترامٌ للقانون.',expected:'احترامًا'},
+  {id:'v2541-ajl-waqf',text:'وقف الجندي إجلالٌ للعلم.',expected:'إجلالًا'},
+  {id:'v2541-ajl-amal',text:'عمل الفلاح حبٌ للوطن.',expected:'حبًا'},
+  {id:'v2541-ajl-hudur',text:'حضر الضيف إكرامٌ للمضيف.',expected:'إكرامًا'},
+  {id:'v2541-ajl-safartu',text:'سافرتُ احترامٌ للقانون.',expected:'احترامًا'},
+  {id:'v2541-abdan-lansaa',text:'لا انسى فضلك ابدا.',expected:'أبدًا'},
+  {id:'v2541-abdan-lan-nansak',text:'لن انساك ابدا.',expected:'أبدًا'}
+]);
+
+const V2541_BLOCK_CORPUS = Object.freeze([
+  'يا عبدَ الله.',
+  'يا طالبَ العلم.',
+  'يا طالبًا مجتهدًا.',
+  'يا له من منظر.',
+  'يا للروعة.',
+  'يا معلمُ اجتهد.',
+  'يا موسى.',
+  'يا سلام ما أجمل هذا.',
+  'جاء احترامٌ للقانون.',
+  'كان احترامٌ للقانون واجبًا.',
+  'وصل احترامٌ للقانون.',
+  'ذهب الطالب إلى المدرسة.',
+  'اذهب إلى السوق.',
+  'اكتب الدرس.',
+  'فاذهب أنت وربك.',
+  'سوف أذهب إلى البيت.',
+  'لم أذهب أمس.',
+  'بسم الله الرحمن الرحيم.',
+  'باسم الله.',
+  'قران الحج والعمرة مشروع.',
+  'إن شاء الله.',
+  'ابني يلعب في الحديقة.',
+  'امرأة فاضلة.',
+  'ال التعريف أداة.',
+  'سافر المعلم احترامًا للقانون.',
+  'جاء المعلمون المجتهدون.',
+  'لم ابدا بعد.',
+  'سوف ابدا العمل.',
+  'أحمد الله على نعمه.',
+  'اسمه احمد.',
+  'شرب الطفل الحليب.',
+  'وضعت الكتاب على الطاولة.'
+]);
+
+/* إصلاحات تصحيحات خاطئة سابقة: الناتج المصحح يجب أن يطابق المتوقع تمامًا. */
+const V2541_FIX_CORPUS = Object.freeze([
+  {id:'v2541-fix-ahmad-imperative',text:'احمد الله على نعمه.',expected:'احمد الله على نعمه.'},
+  {id:'v2541-fix-fawran',text:'اترك المكان فورا.',expected:'اترك المكان فورًا.'},
+  {id:'v2541-fix-abadan',text:'لن انساك ابدا.',expected:'لن انساك ابدا.'},
+  {id:'v2541-fix-akul-madda',text:'سوف اكل قريبا.',expected:'سوف آكل قريبا.'},
+  {id:'v2541-fix-akhudh-madda',text:'لم اخذ الكتاب.',expected:'لم آخذ الكتاب.'},
+  {id:'v2541-fix-qad-akal',text:'قد اكل الطفل.',expected:'قد أكل الطفل.'},
+  {id:'v2541-fix-hal-akalt',text:'هل اكلت طعامك؟',expected:'هل أكلت طعامك؟'},
+  {id:'v2541-fix-abdaa-work',text:'سوف ابدا العمل.',expected:'سوف أبدأ العمل.'},
+  {id:'v2541-fix-ismuhu-ahmad',text:'اسمه احمد.',expected:'اسمه أحمد.'}
+]);
+
+function runRegressionSuiteV2541(options={}){
+  const failures=[]; let passed=0;
+  for(const test of V2541_GOLD_CORPUS){
+    const r=analyzeV25(test.text,{safeMode:true,...options});
+    const candidates=[...(r.findings||[]),...(r.abstained||[])];
+    const hit=candidates.some(f=>String(f.replacement||'').includes(test.expected))
+      || String(r.corrected||'').includes(test.expected);
+    if(hit) passed++;
+    else failures.push({id:test.id,kind:'missed-error',text:test.text,expected:test.expected,
+      got:candidates.map(f=>`${f.ruleId}:${f.original}>${f.replacement}`)});
+  }
+  for(const text of V2541_BLOCK_CORPUS){
+    const r=analyzeV25(text,{safeMode:true,...options});
+    const own=[...(r.findings||[]),...(r.abstained||[])].filter(f=>String(f.ruleId||'').startsWith('V2541'));
+    if(!own.length) passed++;
+    else failures.push({kind:'false-positive-v2541',text,
+      findings:own.map(f=>({ruleId:f.ruleId,original:f.original,replacement:f.replacement,decisionClass:f.decisionClass}))});
+  }
+  for(const test of V2541_FIX_CORPUS){
+    const r=analyzeV25(test.text,{safeMode:true,...options});
+    if(String(r.corrected||'')===String(test.expected)) passed++;
+    else failures.push({id:test.id,kind:'fix-regression',text:test.text,expected:test.expected,got:r.corrected});
+  }
+  return {version:V25_VERSION,total:V2541_GOLD_CORPUS.length+V2541_BLOCK_CORPUS.length+V2541_FIX_CORPUS.length,
+    passed,failed:failures.length,failures,valid:failures.length===0};
+}
+function runV2541RecallExpansionAudit(options={}){
+  const regression=runRegressionSuiteV2541(options);
+  const gold=regression.failures.filter(f=>String(f.kind||'')==='missed-error').length===0;
+  const fpFree=regression.failures.every(f=>String(f.kind||'')!=='false-positive-v2541');
+  const fixOk=regression.failures.every(f=>String(f.kind||'')!=='fix-regression');
+  return {version:V25_VERSION,valid:regression.valid,regression,
+    grammarPolicy:'review-only',falsePositiveFree:fpFree,wrongCorrectionFixes:fixOk,recallComplete:gold};
+}
+
+
 function applyV25DecisionEngineV252(context, legacy, options={}){
   let candidates=v25LegacySanitize(context,[...(legacy.findings||[])]);
   candidates=v251ResolveAlaIlla(context,candidates); // V25.2 — حسم اتجاه «الا»
@@ -25071,6 +25640,11 @@ function applyV25DecisionEngineV252(context, legacy, options={}){
   if(context.options.rules.v254RecallExpansion !== false){
     v254AddBlindOrthography(context,candidates,seen);
     v254AddRoleRecall(context,candidates,seen);
+  }
+  // V25.4.1: توسيع استدعاء آمن الدقة + إصلاحات تصحيحات خاطئة موثقة.
+  if(context.options.rules.v2541RecallExpansion !== false){
+    v2541AddOrthography(context,candidates,seen);
+    v2541AddGrammarRecall(context,candidates,seen);
   }
   // Final structural vetoes run after *all* recall supplements, because a late
   // layer must never recreate a candidate that an earlier safety layer rejected.
@@ -25153,7 +25727,7 @@ function pipelineDescriptionV25(){
   return {version:V25_VERSION,engine:'V25DecisionEngine',order:[
     'Normalization','Tokenization','ProtectedSpans','Morphology','POS','PhraseDetection','ClauseDetection','VerbFrame',
     'Subject','Object','Government','Agreement','Dependency','RoleEvidence','CandidateGeneration','CandidateRegistry',
-    'ConflictResolution','Confidence+DecisionMargin','Veto','SafeBlindOrthography','RoleRecall(Manual)','CorrectionRanking','SafeCorrection'
+    'ConflictResolution','Confidence+DecisionMargin','Veto','SafeBlindOrthography','RoleRecall(Manual)','V2541PrecisionSafeRecall','CorrectionRanking','SafeCorrection'
   ],legacyBase:'V18→V24.5 preserved'};
 }
 function validateV25Data(){
@@ -25242,7 +25816,7 @@ function runFullSuiteV25(options={}){
     ['V19.2.0',runRegressionSuiteV1920],['V20.0.0',runRegressionSuiteV20],
     ['V23.0.0',runRegressionSuiteV23],['V24.1.0',runRegressionSuiteV241],
     ['V24.2.x',runRegressionSuiteV242],['V24.3.0',runRegressionSuiteV243],
-    ['V24.3.1',runRegressionSuiteV2431],['V24.5.0',runRegressionSuiteV245],['V25.4.0',runRegressionSuiteV254]
+    ['V24.3.1',runRegressionSuiteV2431],['V24.5.0',runRegressionSuiteV245],['V25.4.0',runRegressionSuiteV254],['V25.4.1',runRegressionSuiteV2541]
   ];
   const regressions={}; let regressionsValid=true;
   for(const [label,fn] of regressionNames){
@@ -25512,6 +26086,8 @@ function validateV25(options={}){
   V25_GOLD_CORPUS, V25_BLOCK_CORPUS, V25_AUTO_GOLD_CORPUS, V25_DECISION_TIERS, V25CandidateRegistry, V25ConflictResolver,
   V253_GOLD_CORPUS, V253_BLOCK_CORPUS, runRegressionSuiteV253, runV253RecallGapAudit,
   V254_BLIND_SAFE_ORTHOGRAPHY, V254_BLIND_SAFE_PHRASES, V254_GOLD_CORPUS, V254_BLOCK_CORPUS, runRegressionSuiteV254, runV254RecallExpansionAudit,
+  V2541_SAFE_ORTHOGRAPHY, V2541_SAFE_PHRASES, V2541_GOLD_CORPUS, V2541_BLOCK_CORPUS, V2541_FIX_CORPUS,
+  runRegressionSuiteV2541, runV2541RecallExpansionAudit,
   analyze: analyzeV25, check: analyzeV25, correct: correctV25, suggest: suggestV25,
   correctSafe: correctSafeV25, parse: parseV25, diacritize: diacritizeV25,
   inspectPOS: inspectPOSV25, inspectSyntax: inspectSyntaxV25, inspectDependencies: inspectDependenciesV25,
@@ -25533,7 +26109,10 @@ function validateV25(options={}){
     recallGapV253:runV253RecallGapAudit, regressionV253:runRegressionSuiteV253,
     recallExpansionV254:runV254RecallExpansionAudit, regressionV254:runRegressionSuiteV254,
     blindOrthographyV254:V254_BLIND_SAFE_ORTHOGRAPHY,
-    V253_GOLD_CORPUS, V253_BLOCK_CORPUS, V254_GOLD_CORPUS, V254_BLOCK_CORPUS}),
+    recallExpansionV2541:runV2541RecallExpansionAudit, regressionV2541:runRegressionSuiteV2541,
+    safeOrthographyV2541:V2541_SAFE_ORTHOGRAPHY,
+    V253_GOLD_CORPUS, V253_BLOCK_CORPUS, V254_GOLD_CORPUS, V254_BLOCK_CORPUS,
+    V2541_GOLD_CORPUS, V2541_BLOCK_CORPUS, V2541_FIX_CORPUS}),
   V25_3_PRO: Object.freeze({version:V25_VERSION, edition:META.edition, analyze:analyzeV25, correct:correctV25, suggest:suggestV25,
     correctSafe:correctSafeV25, validate:validateV25, recallGapAudit:runV253RecallGapAudit,
     regression:runRegressionSuiteV253, runFullSuiteV25, runBenchmarkV25}),
@@ -25541,6 +26120,14 @@ function validateV25(options={}){
     correctSafe:correctSafeV25, validate:validateV25, blindOrthography:V254_BLIND_SAFE_ORTHOGRAPHY,
     recallExpansionAudit:runV254RecallExpansionAudit, regression:runRegressionSuiteV254,
     runFullSuiteV25, runBenchmarkV25, grammarPolicy:'review-only'}),
+  V25_4_1_PRO: Object.freeze({version:V25_VERSION, edition:META.edition, analyze:analyzeV25, correct:correctV25, suggest:suggestV25,
+    correctSafe:correctSafeV25, validate:validateV25,
+    safeOrthography:V2541_SAFE_ORTHOGRAPHY, safePhrases:V2541_SAFE_PHRASES,
+    governedHamzaQat3:V2541_GOVERNED_HAMZA_QAT3, governedHamzaMadda:V2541_GOVERNED_HAMZA_MADDA,
+    recallExpansionAudit:runV2541RecallExpansionAudit, regression:runRegressionSuiteV2541,
+    goldCorpus:V2541_GOLD_CORPUS, blockCorpus:V2541_BLOCK_CORPUS, fixCorpus:V2541_FIX_CORPUS,
+    runFullSuiteV25, runBenchmarkV25, grammarPolicy:'review-only',
+    description:'Precision-Safe Recall Expansion 1.0 — إصلاحات تصحيحات خاطئة + إملاء مراجع + استدعاء نحوي يدوي'}),
   // ── V21.0.0 PRO FINAL — المنادى والتعجب ──
   V21_PRO: Object.freeze({version: '21.0.0', edition: 'PRO-FINAL-V21.0',
     analyze: analyzePRO, validate: runFullSuiteV1920,
